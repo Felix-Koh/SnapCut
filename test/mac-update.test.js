@@ -15,9 +15,11 @@ const {
 const helperPath = path.join(__dirname, '..', 'src', 'main', 'mac-update-helper.sh');
 
 test('macOS updater resolves only an enclosing app bundle and validates versions', () => {
+  const root = path.parse(process.cwd()).root;
+  const appBundle = path.join(root, 'Applications', 'SnapCut.app');
   assert.equal(
-    resolveMacAppBundle('/Applications/SnapCut.app/Contents/MacOS/SnapCut'),
-    '/Applications/SnapCut.app',
+    resolveMacAppBundle(path.join(appBundle, 'Contents', 'MacOS', 'SnapCut')),
+    appBundle,
   );
   assert.equal(safeUpdateVersion('1.2.5'), '1.2.5');
   assert.throws(() => resolveMacAppBundle('/usr/local/bin/SnapCut'), /找不到/);
@@ -67,7 +69,9 @@ test('macOS updater writes a private helper and launches it detached with positi
   ]);
   assert.deepEqual(invocation.options, { detached: true, stdio: 'ignore' });
   assert.equal(invocation.unref, true);
-  assert.equal((await fs.promises.stat(result.helperPath)).mode & 0o777, 0o700);
+  const helperStats = await fs.promises.stat(result.helperPath);
+  assert.equal(helperStats.isFile(), true);
+  if (process.platform !== 'win32') assert.equal(helperStats.mode & 0o777, 0o700);
 });
 
 test('macOS helper validates, stages, rolls back, and relaunches without opening the DMG UI', () => {
