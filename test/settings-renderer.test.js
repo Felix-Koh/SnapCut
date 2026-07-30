@@ -31,6 +31,8 @@ function fakeElement() {
     disabled: false,
     hidden: false,
     options: [],
+    attributes: new Map(),
+    style: {},
     textContent: '',
     value: '',
     addEventListener(type, listener) {
@@ -41,6 +43,9 @@ function fakeElement() {
     },
     replaceChildren(...children) {
       this.options = children;
+    },
+    setAttribute(name, value) {
+      this.attributes.set(name, String(value));
     },
   };
 }
@@ -61,6 +66,11 @@ function createHarness({ startCaptureResult = { ok: true } } = {}) {
     '#quit-button',
     '#releases-button',
     '#status-pill',
+    '#update-button',
+    '#update-detail',
+    '#update-progress',
+    '#update-progress-bar',
+    '#update-status',
     '#version-label',
   ];
   const elements = Object.fromEntries(selectors.map((selector) => [selector, fakeElement()]));
@@ -73,6 +83,13 @@ function createHarness({ startCaptureResult = { ok: true } } = {}) {
     platform: 'darwin',
     screenPermission: 'granted',
     lastCaptureError: null,
+    update: {
+      phase: 'idle',
+      currentVersion: '1.0.0',
+      latestVersion: null,
+      progress: 0,
+      message: '尚未检查更新',
+    },
     settings: {
       hotkey: 'Control+Command+A',
       hotkeyOptions: ['Control+Command+A', 'Command+Shift+A', 'Alt+A'],
@@ -85,10 +102,13 @@ function createHarness({ startCaptureResult = { ok: true } } = {}) {
 
   const snapcut = {
     getAppContext: async () => structuredClone(actualContext),
+    checkForUpdates: async () => structuredClone(actualContext.update),
+    downloadAndInstallUpdate: async () => ({ ok: true }),
     onCaptureError: () => {},
     onSettingsChanged: (listener) => {
       settingsChanged = listener;
     },
+    onUpdateChanged: () => {},
     openReleases: async () => {},
     openScreenPermission: async () => {},
     quit: async () => {},

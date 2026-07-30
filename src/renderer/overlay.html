@@ -8,7 +8,7 @@
     />
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
     <title>SnapCut 截图</title>
-    <link rel="stylesheet" href="overlay.css?v=1.1.0" />
+    <link rel="stylesheet" href="overlay.css?v=1.2.0" />
   </head>
   <body>
     <canvas
@@ -77,10 +77,21 @@
           <button type="button" data-color="#3b82f6" aria-label="蓝色"></button>
           <button type="button" data-color="#ffffff" aria-label="白色"></button>
           <button type="button" data-color="#111827" aria-label="黑色"></button>
-          <label class="custom-color" title="自定义颜色">
-            <span class="sr-only">自定义颜色</span>
-            <input id="custom-color" type="color" value="#ef4444" aria-label="自定义颜色" />
-          </label>
+          <button
+            class="custom-color-button"
+            id="custom-color-button"
+            type="button"
+            aria-label="自定义颜色"
+            title="自定义颜色"
+          ></button>
+          <input
+            class="custom-color-input"
+            id="custom-color"
+            type="color"
+            value="#ef4444"
+            aria-label="自定义颜色选择器"
+            tabindex="-1"
+          />
         </div>
       </div>
 
@@ -89,6 +100,9 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path class="size-icon-thin" d="M5 7h14" /><path class="size-icon-thick" d="M5 16h14" /></svg>
         </button>
         <div class="popover size-popover" id="size-popover" role="group" aria-label="调整粗细">
+          <div class="size-preview" id="size-preview" aria-hidden="true">
+            <span id="size-preview-mark"></span>
+          </div>
           <label class="size-control" for="size-range">
             <span id="size-label">线条粗细</span>
             <input id="size-range" type="range" min="1" max="20" step="0.5" value="4" />
@@ -132,7 +146,7 @@
     <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
     <div class="sr-status" id="sr-status" role="status" aria-live="polite"></div>
 
-    <script src="../shared/geometry.js?v=1.1.0"></script>
-    <script src="overlay.js?v=1.1.0"></script>
+    <script src="../shared/geometry.js?v=1.2.0"></script>
+    <script src="overlay.js?v=1.2.0"></script>
   </body>
 </html>

@@ -264,6 +264,58 @@ kbd {
   box-shadow: var(--shadow);
 }
 
+.update-card {
+  padding-block: 14px;
+}
+
+.update-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.update-row .section-heading {
+  min-width: 0;
+}
+
+.update-row .section-heading p {
+  margin-top: 3px;
+}
+
+.update-progress {
+  height: 6px;
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted-foreground) 18%, var(--surface));
+}
+
+.update-progress[hidden] {
+  display: none;
+}
+
+.update-progress span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+  transition: width 120ms ease;
+}
+
+.update-detail {
+  margin: 9px 0 0 49px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.secondary-button:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
 .section-heading {
   gap: 11px;
 }

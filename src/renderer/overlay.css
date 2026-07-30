@@ -306,9 +306,9 @@ textarea {
 }
 
 .popover {
-  position: absolute;
-  bottom: calc(100% + 9px);
-  left: 50%;
+  position: fixed;
+  top: 0;
+  left: 0;
   display: none;
   align-items: center;
   gap: 5px;
@@ -317,7 +317,6 @@ textarea {
   border-radius: 10px;
   background: var(--toolbar);
   box-shadow: 0 10px 26px rgb(0 0 0 / 36%);
-  transform: translateX(-50%);
 }
 
 .popover.is-open {
@@ -351,8 +350,7 @@ textarea {
   background: rgb(13 148 136 / 25%);
 }
 
-.custom-color {
-  position: relative;
+.custom-color-button {
   display: grid;
   width: 28px;
   height: 28px;
@@ -364,15 +362,74 @@ textarea {
   cursor: pointer;
 }
 
-.custom-color input {
-  width: 42px;
-  height: 42px;
+.custom-color-button::before {
+  content: "";
+  width: 15px;
+  height: 15px;
+  border: 2px solid rgb(255 255 255 / 72%);
+  border-radius: 50%;
+  background: conic-gradient(#ef4444, #f59e0b, #22c55e, #3b82f6, #a855f7, #ef4444);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 48%);
+}
+
+.custom-color-input {
+  position: fixed;
+  top: -20px;
+  left: -20px;
+  width: 1px;
+  height: 1px;
   opacity: 0;
-  cursor: pointer;
+  pointer-events: none;
 }
 
 .size-popover {
+  flex-direction: column;
   min-width: 250px;
+  gap: 8px;
+  padding: 9px;
+}
+
+.size-preview {
+  display: grid;
+  width: 100%;
+  height: 42px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 11%);
+  border-radius: 7px;
+  background: rgb(255 255 255 / 5%);
+}
+
+.size-preview span {
+  display: block;
+  width: 78%;
+  min-height: 1px;
+  border-radius: 999px;
+  background: var(--primary-bright);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 20%);
+}
+
+.size-preview.is-text span {
+  width: auto;
+  min-height: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--primary-bright);
+  font-weight: 750;
+  line-height: 1;
+}
+
+.size-preview.is-mosaic span {
+  width: var(--mosaic-preview-size, 20px);
+  height: var(--mosaic-preview-size, 20px);
+  border: 1px solid rgb(255 255 255 / 25%);
+  border-radius: 3px;
+  background:
+    linear-gradient(45deg, rgb(45 212 191 / 82%) 25%, transparent 25% 75%, rgb(45 212 191 / 82%) 75%),
+    linear-gradient(45deg, rgb(45 212 191 / 42%) 25%, transparent 25% 75%, rgb(45 212 191 / 42%) 75%);
+  background-position: 0 0, 5px 5px;
+  background-size: 10px 10px;
+  box-shadow: none;
 }
 
 .size-control {

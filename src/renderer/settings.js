@@ -16,6 +16,11 @@
     quit: document.querySelector('#quit-button'),
     releases: document.querySelector('#releases-button'),
     status: document.querySelector('#status-pill'),
+    updateButton: document.querySelector('#update-button'),
+    updateDetail: document.querySelector('#update-detail'),
+    updateProgress: document.querySelector('#update-progress'),
+    updateProgressBar: document.querySelector('#update-progress-bar'),
+    updateStatus: document.querySelector('#update-status'),
     version: document.querySelector('#version-label'),
   };
 
@@ -50,6 +55,44 @@
     );
   }
 
+  function renderUpdate(update, platform) {
+    const state = update || {
+      phase: 'idle',
+      currentVersion: context?.version || '',
+      latestVersion: null,
+      progress: 0,
+      message: '尚未检查更新',
+    };
+    const busy = state.phase === 'checking' || state.phase === 'downloading';
+    const available = state.phase === 'available';
+    const progress = Math.max(0, Math.min(100, Number(state.progress) || 0));
+    elements.updateStatus.textContent = state.message || '尚未检查更新';
+    elements.updateButton.disabled = busy || state.phase === 'ready' || state.phase === 'unsupported';
+    elements.updateButton.textContent = available
+      ? '下载并升级'
+      : state.phase === 'checking'
+        ? '检查中…'
+        : state.phase === 'downloading'
+          ? `${progress}%`
+          : state.phase === 'ready'
+            ? '安装包已打开'
+            : state.phase === 'up-to-date'
+              ? '再次检查'
+              : '检查更新';
+    elements.updateProgress.hidden = state.phase !== 'downloading';
+    elements.updateProgress.setAttribute('aria-hidden', String(state.phase !== 'downloading'));
+    elements.updateProgressBar.style.width = `${progress}%`;
+    if (state.phase === 'available') {
+      elements.updateDetail.textContent = `当前 ${state.currentVersion}，最新 ${state.latestVersion}。下载后会先校验安装包。`;
+    } else if (state.phase === 'ready' && platform === 'darwin') {
+      elements.updateDetail.textContent = '请在已打开的 DMG 中将 SnapCut 拖入“应用程序”。';
+    } else if (state.phase === 'unsupported') {
+      elements.updateDetail.textContent = 'SnapCut 仅提供 Windows x64 和 Apple Silicon Mac 安装包。';
+    } else {
+      elements.updateDetail.textContent = '检查并下载适合当前系统的正式版本。';
+    }
+  }
+
   function render(nextContext) {
     if (!nextContext) return;
     context = nextContext;
@@ -58,6 +101,7 @@
     // that are still waiting to be persisted.
     const settings = applyPendingSettings(nextContext.settings);
     elements.version.textContent = `${nextContext.appName} ${nextContext.version}`;
+    renderUpdate(nextContext.update, nextContext.platform);
     elements.heroHotkey.textContent = friendlyHotkey(settings.hotkey, nextContext.platform);
     elements.launch.checked = settings.launchAtLogin;
     elements.magnifier.checked = settings.showMagnifier;
@@ -187,20 +231,45 @@
   );
   elements.dismissError.addEventListener('click', hideError);
   elements.permissionButton.addEventListener('click', () => window.snapcut?.openScreenPermission());
+  elements.updateButton.addEventListener('click', async () => {
+    if (!window.snapcut) return;
+    hideError();
+    elements.updateButton.disabled = true;
+    try {
+      if (context?.update?.phase === 'available') {
+        await window.snapcut.downloadAndInstallUpdate();
+      } else {
+        await window.snapcut.checkForUpdates();
+      }
+    } catch (error) {
+      showError(error.message || String(error));
+    }
+  });
   elements.releases.addEventListener('click', () => window.snapcut?.openReleases());
   elements.quit.addEventListener('click', () => window.snapcut?.quit());
 
   if (window.snapcut) {
     window.snapcut.onSettingsChanged(render);
+    window.snapcut.onUpdateChanged((update) => {
+      if (!context) return;
+      render({ ...context, update });
+    });
     window.snapcut.onCaptureError((error) => showError(error.message));
     window.snapcut.getAppContext().then(render).catch((error) => showError(error.message));
   } else {
     render({
       appName: 'SnapCut',
-      version: '1.1.0 preview',
+      version: '1.2.0 preview',
       platform: navigator.platform.includes('Mac') ? 'darwin' : 'win32',
       screenPermission: 'granted',
       lastCaptureError: null,
+      update: {
+        phase: 'available',
+        currentVersion: '1.1.0',
+        latestVersion: '1.2.0',
+        progress: 0,
+        message: '发现新版本 1.2.0',
+      },
       settings: {
         hotkey: navigator.platform.includes('Mac') ? 'Control+Command+A' : 'Alt+A',
         hotkeyOptions: navigator.platform.includes('Mac')

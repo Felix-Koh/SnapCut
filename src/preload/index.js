@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('snapcut', {
   onCaptureReady: (listener) => subscribe('capture:ready', listener),
   onCaptureError: (listener) => subscribe('capture:error', listener),
   onSettingsChanged: (listener) => subscribe('settings:changed', listener),
+  onUpdateChanged: (listener) => subscribe('update:changed', listener),
   copyImage: (pngBytes) => ipcRenderer.invoke('capture:copy', pngBytes),
   saveImage: (pngBytes, suggestedName) =>
     ipcRenderer.invoke('capture:save', { pngBytes, suggestedName }),
@@ -20,6 +21,8 @@ contextBridge.exposeInMainWorld('snapcut', {
   getAppContext: () => ipcRenderer.invoke('app:context'),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (patch) => ipcRenderer.invoke('settings:update', patch),
+  checkForUpdates: () => ipcRenderer.invoke('update:check'),
+  downloadAndInstallUpdate: () => ipcRenderer.invoke('update:download-install'),
   openScreenPermission: () => ipcRenderer.invoke('permission:open-screen-settings'),
   openReleases: () => ipcRenderer.invoke('shell:open-releases'),
   showItemInFolder: (filePath) => ipcRenderer.invoke('shell:show-item', filePath),

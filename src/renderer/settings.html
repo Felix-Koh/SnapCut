@@ -8,7 +8,7 @@
     />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>SnapCut</title>
-    <link rel="stylesheet" href="settings.css?v=1.1.0" />
+    <link rel="stylesheet" href="settings.css?v=1.2.0" />
   </head>
   <body>
     <main class="app-shell" id="main-content">
@@ -98,6 +98,25 @@
         </label>
       </section>
 
+      <section class="settings-card update-card" aria-labelledby="update-heading">
+        <div class="update-row">
+          <div class="section-heading">
+            <div class="section-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 5v6h-6" /><path d="M12 8v4l2.5 1.5" /></svg>
+            </div>
+            <div>
+              <h2 id="update-heading">软件更新</h2>
+              <p id="update-status" role="status" aria-live="polite">尚未检查更新</p>
+            </div>
+          </div>
+          <button class="secondary-button" id="update-button" type="button">检查更新</button>
+        </div>
+        <div class="update-progress" id="update-progress" hidden aria-hidden="true">
+          <span id="update-progress-bar"></span>
+        </div>
+        <p class="update-detail" id="update-detail">检查并下载适合当前系统的正式版本。</p>
+      </section>
+
       <section class="permission-card" id="permission-card" hidden aria-labelledby="permission-heading">
         <div class="permission-copy">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.9 8.3 7 10 4.1-1.7 7-5.4 7-10V6l-7-3Z" /><path d="m9 12 2 2 4-5" /></svg>
@@ -122,6 +141,6 @@
         </div>
       </footer>
     </main>
-    <script src="settings.js"></script>
+    <script src="settings.js?v=1.2.0"></script>
   </body>
 </html>

@@ -20,6 +20,7 @@ const {
 
 const { SettingsStore, platformHotkeys, sanitizeSettings } = require('./settings-store');
 const { displayMetricsAffectCaptureMapping } = require('./display-metrics');
+const { UpdateService } = require('./update-service');
 const {
   enumerateWindowsWithTimeout,
   preloadWindowEnumerator,
@@ -47,6 +48,14 @@ let capturePixelSize = null;
 let captureAttempt = 0;
 let overlayClosing = false;
 let overlayAwaitingLoad = false;
+let updateService = null;
+let updateState = {
+  phase: 'idle',
+  currentVersion: null,
+  latestVersion: null,
+  progress: 0,
+  message: '尚未检查更新',
+};
 
 const singleInstance = app.requestSingleInstanceLock();
 if (!singleInstance) {
@@ -82,6 +91,7 @@ function appContext() {
     screenPermission: permissionStatus(),
     settings: publicSettings(),
     lastCaptureError,
+    update: { ...updateState },
   };
 }
 
@@ -159,9 +169,9 @@ function createSettingsWindow({ show = true } = {}) {
   settingsWindow = new BrowserWindow(
     safeWindowOptions({
       width: 480,
-      height: 610,
+      height: 740,
       minWidth: 440,
-      minHeight: 560,
+      minHeight: 620,
       maxWidth: 620,
       title: APP_NAME,
       show: false,
@@ -190,6 +200,94 @@ function createSettingsWindow({ show = true } = {}) {
 
 function showSettings() {
   createSettingsWindow({ show: true });
+}
+
+function setUpdateState(patch) {
+  updateState = { ...updateState, ...patch };
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.webContents.send('update:changed', { ...updateState });
+  }
+}
+
+async function checkForUpdates({ silent = false } = {}) {
+  if (!updateService) throw new Error('更新服务尚未准备好');
+  setUpdateState({
+    phase: 'checking',
+    currentVersion: app.getVersion(),
+    latestVersion: null,
+    progress: 0,
+    message: '正在检查更新…',
+  });
+  try {
+    const result = await updateService.check();
+    if (!result.supported) {
+      setUpdateState({
+        phase: 'unsupported',
+        latestVersion: result.latestVersion,
+        message: '当前系统架构暂无可用安装包',
+      });
+    } else if (result.available) {
+      setUpdateState({
+        phase: 'available',
+        latestVersion: result.latestVersion,
+        message: `发现新版本 ${result.latestVersion}`,
+      });
+    } else {
+      setUpdateState({
+        phase: 'up-to-date',
+        latestVersion: result.latestVersion,
+        message: '当前已经是最新版本',
+      });
+    }
+  } catch (error) {
+    setUpdateState({
+      phase: 'error',
+      message: error?.message || '检查更新失败，请稍后重试',
+    });
+    if (!silent) throw error;
+  }
+  return { ...updateState };
+}
+
+async function downloadAndOpenUpdate() {
+  if (!updateService) throw new Error('更新服务尚未准备好');
+  let lastPercent = -1;
+  setUpdateState({ phase: 'downloading', progress: 0, message: '正在下载新版本…' });
+  try {
+    const result = await updateService.download(({ received, total }) => {
+      const percent = total > 0 ? Math.min(100, Math.floor((received / total) * 100)) : 0;
+      if (percent === lastPercent) return;
+      lastPercent = percent;
+      setUpdateState({
+        phase: 'downloading',
+        progress: percent,
+        message: `正在下载新版本… ${percent}%`,
+      });
+    });
+    const openError = await shell.openPath(result.filePath);
+    if (openError) throw new Error(`安装包无法打开：${openError}`);
+    setUpdateState({
+      phase: 'ready',
+      progress: 100,
+      message: isMac()
+        ? '已打开安装包，请将 SnapCut 拖入“应用程序”完成升级'
+        : '已启动新版安装程序',
+    });
+    if (process.platform === 'win32') {
+      setTimeout(() => {
+        isQuitting = true;
+        app.quit();
+      }, 500);
+    }
+    return { ok: true, state: { ...updateState } };
+  } catch (error) {
+    setUpdateState({
+      phase: 'error',
+      progress: 0,
+      message: error?.message || '升级失败，请稍后重试',
+    });
+    throw error;
+  }
 }
 
 function sendSettingsChanged() {
@@ -562,6 +660,13 @@ function rebuildTrayMenu() {
     { type: 'separator' },
     { label: '偏好设置…', click: showSettings },
     {
+      label: '检查更新…',
+      click: () => {
+        showSettings();
+        checkForUpdates().catch(() => {});
+      },
+    },
+    {
       label: '开机时启动',
       type: 'checkbox',
       checked: settings.launchAtLogin,
@@ -678,6 +783,14 @@ function installIpcHandlers() {
     sendSettingsChanged();
     return { ok: true, settings: publicSettings() };
   });
+  ipcMain.handle('update:check', (event) => {
+    assertSettingsSender(event);
+    return checkForUpdates();
+  });
+  ipcMain.handle('update:download-install', (event) => {
+    assertSettingsSender(event);
+    return downloadAndOpenUpdate();
+  });
   ipcMain.handle('capture:start', async (event) => {
     assertSettingsSender(event);
     return startCapture();
@@ -759,10 +872,23 @@ async function initialize() {
 
   settingsStore = new SettingsStore(app.getPath('userData'));
   const initial = settingsStore.load();
+  updateService = new UpdateService({
+    currentVersion: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    tempDirectory: app.getPath('temp'),
+  });
+  updateState.currentVersion = app.getVersion();
   registerInitialHotkey(initial.hotkey);
   installIpcHandlers();
   createTray();
   setImmediate(() => preloadWindowEnumerator());
+  if (app.isPackaged) {
+    const automaticUpdateTimer = setTimeout(() => {
+      checkForUpdates({ silent: true }).catch(() => {});
+    }, 12_000);
+    automaticUpdateTimer.unref?.();
+  }
 
   const cancelActiveCaptureForDisplayChange = () => {
     if (!captureInProgress && !overlayWindow) return;

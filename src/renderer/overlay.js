@@ -19,6 +19,7 @@
     colorPreview: document.querySelector('#color-preview'),
     copy: document.querySelector('#copy-button'),
     customColor: document.querySelector('#custom-color'),
+    customColorButton: document.querySelector('#custom-color-button'),
     instruction: document.querySelector('#instruction'),
     loading: document.querySelector('#loading-panel'),
     magnifier: document.querySelector('#magnifier'),
@@ -31,6 +32,8 @@
     sizeButton: document.querySelector('#size-button'),
     sizeLabel: document.querySelector('#size-label'),
     sizePopover: document.querySelector('#size-popover'),
+    sizePreview: document.querySelector('#size-preview'),
+    sizePreviewMark: document.querySelector('#size-preview-mark'),
     sizeRange: document.querySelector('#size-range'),
     sizeValue: document.querySelector('#size-value'),
     srStatus: document.querySelector('#sr-status'),
@@ -522,12 +525,35 @@
     );
     elements.toolbar.style.left = `${toolbarPosition.x}px`;
     elements.toolbar.style.top = `${toolbarPosition.y}px`;
+    positionOpenPopovers();
+  }
 
-    const opensDown = toolbarPosition.y < 82;
-    document.querySelectorAll('.popover').forEach((popover) => {
-      popover.style.bottom = opensDown ? 'auto' : 'calc(100% + 9px)';
-      popover.style.top = opensDown ? 'calc(100% + 9px)' : 'auto';
-    });
+  function positionPopover(popover, button) {
+    if (!popover.classList.contains('is-open')) return;
+    const buttonRect = button.getBoundingClientRect();
+    const popoverRect = popover.getBoundingClientRect();
+    const gap = 9;
+    const left = geometry.clamp(
+      buttonRect.left + buttonRect.width / 2 - popoverRect.width / 2,
+      8,
+      Math.max(8, state.viewSize.width - popoverRect.width - 8),
+    );
+    const above = buttonRect.top - popoverRect.height - gap;
+    const below = buttonRect.bottom + gap;
+    const top = above >= 8
+      ? above
+      : geometry.clamp(
+        below,
+        8,
+        Math.max(8, state.viewSize.height - popoverRect.height - 8),
+      );
+    popover.style.left = `${Math.round(left)}px`;
+    popover.style.top = `${Math.round(top)}px`;
+  }
+
+  function positionOpenPopovers() {
+    positionPopover(elements.colorPopover, elements.colorButton);
+    positionPopover(elements.sizePopover, elements.sizeButton);
   }
 
   function hasOpenPopover() {
@@ -557,6 +583,7 @@
     if (opening) {
       popover.classList.add('is-open');
       button.setAttribute('aria-expanded', 'true');
+      positionPopover(popover, button);
       popover.querySelector('button, input')?.focus();
     }
   }
@@ -601,6 +628,28 @@
     elements.sizeRange.disabled = state.busy || !supportsSize;
     elements.sizeLabel.textContent = sizeConfig.label;
     elements.sizeValue.textContent = `${settings?.size ?? 4} px`;
+    elements.sizePreview.classList.toggle('is-text', state.tool === 'text');
+    elements.sizePreview.classList.toggle('is-mosaic', state.tool === 'mosaic');
+    if (state.tool === 'text') {
+      elements.sizePreviewMark.textContent = 'Aa';
+      elements.sizePreviewMark.style.fontSize = `${Math.min(settings?.size ?? 22, 30)}px`;
+      elements.sizePreviewMark.style.height = 'auto';
+    } else if (state.tool === 'mosaic') {
+      elements.sizePreviewMark.textContent = '';
+      elements.sizePreviewMark.style.fontSize = '';
+      elements.sizePreviewMark.style.height = 'auto';
+      elements.sizePreview.style.setProperty(
+        '--mosaic-preview-size',
+        `${Math.min(settings?.size ?? 24, 32)}px`,
+      );
+    } else {
+      elements.sizePreviewMark.textContent = '';
+      elements.sizePreviewMark.style.fontSize = '';
+      elements.sizePreviewMark.style.height = `${Math.min(settings?.size ?? 4, 20)}px`;
+    }
+    if (elements.sizePopover.classList.contains('is-open')) {
+      positionPopover(elements.sizePopover, elements.sizeButton);
+    }
     elements.sizeButton.setAttribute(
       'aria-label',
       state.tool === 'text'
@@ -1548,6 +1597,18 @@
       closePopovers(true);
       updateToolbarState();
     });
+  });
+  elements.customColorButton.addEventListener('click', () => {
+    if (state.busy || !state.toolSettings[state.tool]?.color) return;
+    try {
+      if (typeof elements.customColor.showPicker === 'function') {
+        elements.customColor.showPicker();
+      } else {
+        elements.customColor.click();
+      }
+    } catch {
+      elements.customColor.click();
+    }
   });
   elements.customColor.addEventListener('input', () => {
     if (state.busy || !state.toolSettings[state.tool]?.color) return;
