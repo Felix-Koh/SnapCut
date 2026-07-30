@@ -3,7 +3,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const html = fs.readFileSync(path.join(__dirname, '../src/renderer/overlay.html'), 'utf8');
+const html = fs
+  .readFileSync(path.join(__dirname, '../src/renderer/overlay.html'), 'utf8')
+  .replaceAll('\r\n', '\n');
 const css = fs.readFileSync(path.join(__dirname, '../src/renderer/overlay.css'), 'utf8');
 const script = fs.readFileSync(path.join(__dirname, '../src/renderer/overlay.js'), 'utf8');
 
