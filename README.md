@@ -30,12 +30,12 @@ SnapCut 把常用截图能力集中在一个轻量、独立、常驻后台的桌
 
 | 系统 | 文件 | 适用设备 |
 |---|---|---|
-| Windows 10 / 11 | `SnapCut-1.0.0-windows-x64.exe` | 64 位 Intel / AMD 电脑 |
-| macOS Apple Silicon | `SnapCut-1.0.0-macos-arm64.dmg` | macOS 12 或更高版本，M1、M2、M3、M4、M5 等 Mac |
+| Windows 10 / 11 | `SnapCut-1.0.1-windows-x64.exe` | 64 位 Intel / AMD 电脑 |
+| macOS Apple Silicon | `SnapCut-1.0.1-macos-arm64.dmg` | macOS 12 或更高版本，M1、M2、M3、M4、M5 等 Mac |
 
 ### 首版未签名提示
 
-v1.0.0 没有使用 Apple Developer ID 或 Windows Authenticode 证书签名，因此系统会显示正常的安全提醒：
+当前版本没有使用 Apple Developer ID 或 Windows Authenticode 证书签名，因此系统会显示正常的安全提醒：
 
 - Windows：如果 SmartScreen 显示“未知发布者”，确认下载来源为本仓库 Release 后，点击“更多信息”→“仍要运行”。
 - macOS：首次打开时可在 Finder 中右键 SnapCut →“打开”；也可在“系统设置”→“隐私与安全性”中确认打开。
@@ -104,7 +104,7 @@ npm run dist:win         # Windows x64
 
 ## 发布
 
-推送与 `package.json` 版本一致的标签（例如 `v1.0.0`）后，GitHub Actions 会：
+推送与 `package.json` 版本一致的标签（例如 `v1.0.1`）后，GitHub Actions 会：
 
 1. 在 Windows 与 Apple Silicon macOS 的原生 Runner 上分别检查、构建并做启动烟雾测试；
 2. 核验 1 个 EXE、1 个 DMG、1 个 ZIP；

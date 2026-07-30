@@ -1,4 +1,4 @@
-## SnapCut v1.0.0
+## SnapCut v1.0.1
 
 SnapCut 是一个快速、独立、常驻后台的 Windows / macOS 截图工具。
 
@@ -14,8 +14,8 @@ SnapCut 是一个快速、独立、常驻后台的 Windows / macOS 截图工具�
 
 ### 下载哪个文件
 
-- Windows 10 / 11 64 位：`SnapCut-1.0.0-windows-x64.exe`
-- Apple Silicon Mac（M 系列，macOS 12 或更高版本）：`SnapCut-1.0.0-macos-arm64.dmg`
+- Windows 10 / 11 64 位：`SnapCut-1.0.1-windows-x64.exe`
+- Apple Silicon Mac（M 系列，macOS 12 或更高版本）：`SnapCut-1.0.1-macos-arm64.dmg`
 
 ZIP 是 macOS 免挂载压缩包；一般安装优先使用 DMG。
 

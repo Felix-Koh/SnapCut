@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1 - 2026-07-30
+
+- macOS 发布目标调整为 Apple Silicon，不再发布 Intel Mac 安装包
+- 产品说明统一为独立截图与标注工具定位
+- Windows 与 Apple Silicon 的功能保持不变
+
 ## 1.0.0 - 2026-07-30
 
 首个正式版本。

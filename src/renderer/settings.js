@@ -197,7 +197,7 @@
   } else {
     render({
       appName: 'SnapCut',
-      version: '1.0.0 preview',
+      version: '1.0.1 preview',
       platform: navigator.platform.includes('Mac') ? 'darwin' : 'win32',
       screenPermission: 'granted',
       lastCaptureError: null,
