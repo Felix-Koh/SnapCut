@@ -21,7 +21,7 @@ SnapCut 把常用截图能力集中在一个轻量、独立、常驻后台的桌
 - 颜色与粗细弹层自动对齐，粗细调整时提供实时预览
 - 撤销、重做
 - 一键复制到剪贴板，或保存为无损 PNG
-- 系统托盘 / 菜单栏常驻、可选开机启动
+- 系统托盘 / 菜单栏常驻，可随时隐藏图标或选择开机启动
 - 软件内检查更新、下载进度与一键升级，安装包下载后自动核验 SHA-256
 - Retina 与 Windows 高 DPI 缩放适配
 - 无遥测、无截图上传、无截图历史；网络仅用于从本仓库检查和下载正式版本
@@ -32,8 +32,8 @@ SnapCut 把常用截图能力集中在一个轻量、独立、常驻后台的桌
 
 | 系统 | 文件 | 适用设备 |
 |---|---|---|
-| Windows 10 / 11 | `SnapCut-1.2.6-windows-x64.exe` | 64 位 Intel / AMD 电脑 |
-| macOS Apple Silicon | `SnapCut-1.2.6-macos-arm64.dmg` | macOS 12 或更高版本，M1、M2、M3、M4、M5 等 Mac |
+| Windows 10 / 11 | `SnapCut-1.2.7-windows-x64.exe` | 64 位 Intel / AMD 电脑 |
+| macOS Apple Silicon | `SnapCut-1.2.7-macos-arm64.dmg` | macOS 12 或更高版本，M1、M2、M3、M4、M5 等 Mac |
 
 ### 首版未签名提示
 
@@ -75,6 +75,12 @@ SnapCut 把常用截图能力集中在一个轻量、独立、常驻后台的桌
 3. 如果 macOS 要求重启应用，退出并重新打开 SnapCut。
 4. 按全局快捷键，移到目标窗口后单击选中，或拖动自由选择区域。
 5. 直接按 `Enter` 复制并完成，或使用下方工具栏标注、保存。
+
+### 调整或隐藏菜单栏图标
+
+macOS 不允许应用自行指定菜单栏图标的左右位置。按住 `Command` 后拖动 SnapCut 图标，可以把它移动到你习惯的位置；实际最左边界仍由 macOS 的系统区域和其他图标决定。
+
+如果不想显示图标，可在 SnapCut 设置的“常规设置”中关闭“在菜单栏显示图标”。关闭后 SnapCut 仍在后台运行，全局截图快捷键不受影响。从 Finder 的“应用程序”中再次打开 SnapCut，会重新显示设置窗口，可随时恢复该开关。
 
 ## 软件更新
 
@@ -143,7 +149,7 @@ npm run dist:win         # Windows x64
 
 ## 发布
 
-推送与 `package.json` 版本一致的标签（例如 `v1.2.6`）后，GitHub Actions 会：
+推送与 `package.json` 版本一致的标签（例如 `v1.2.7`）后，GitHub Actions 会：
 
 1. 在 Windows 与 Apple Silicon macOS 的原生 Runner 上分别检查、构建并做启动烟雾测试；
 2. 核验 1 个 EXE、1 个 DMG、1 个 ZIP；

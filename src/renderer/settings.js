@@ -16,6 +16,9 @@
     quit: document.querySelector('#quit-button'),
     releases: document.querySelector('#releases-button'),
     status: document.querySelector('#status-pill'),
+    tray: document.querySelector('#tray-toggle'),
+    trayHelp: document.querySelector('#tray-help'),
+    trayLabel: document.querySelector('#tray-label'),
     updateButton: document.querySelector('#update-button'),
     updateDetail: document.querySelector('#update-detail'),
     updateProgress: document.querySelector('#update-progress'),
@@ -109,6 +112,7 @@
     renderUpdate(nextContext.update, nextContext.platform);
     elements.heroHotkey.textContent = friendlyHotkey(settings.hotkey, nextContext.platform);
     elements.launch.checked = settings.launchAtLogin;
+    elements.tray.checked = settings.showTrayIcon;
     elements.magnifier.checked = settings.showMagnifier;
 
     const optionValues = Array.from(elements.hotkey.options).map((option) => option.value);
@@ -131,6 +135,10 @@
     elements.status.classList.toggle('is-error', !settings.hotkeyRegistered);
 
     const isMac = nextContext.platform === 'darwin';
+    elements.trayLabel.textContent = isMac ? '在菜单栏显示图标' : '在系统托盘显示图标';
+    elements.trayHelp.textContent = isMac
+      ? '隐藏后快捷键仍有效；从“应用程序”重新打开 SnapCut 可恢复。'
+      : '隐藏后快捷键仍有效；从开始菜单重新打开 SnapCut 可恢复。';
     elements.permissionCard.hidden = !isMac;
     if (isMac) {
       const granted = nextContext.screenPermission === 'granted';
@@ -231,6 +239,9 @@
   elements.launch.addEventListener('change', () =>
     updateSettings({ launchAtLogin: elements.launch.checked }),
   );
+  elements.tray.addEventListener('change', () =>
+    updateSettings({ showTrayIcon: elements.tray.checked }),
+  );
   elements.magnifier.addEventListener('change', () =>
     updateSettings({ showMagnifier: elements.magnifier.checked }),
   );
@@ -264,16 +275,16 @@
   } else {
     render({
       appName: 'SnapCut',
-      version: '1.2.6 preview',
+      version: '1.2.7 preview',
       platform: navigator.platform.includes('Mac') ? 'darwin' : 'win32',
       screenPermission: 'granted',
       lastCaptureError: null,
       update: {
         phase: 'available',
         currentVersion: '1.2.0',
-        latestVersion: '1.2.6',
+        latestVersion: '1.2.7',
         progress: 0,
-        message: '发现新版本 1.2.6',
+        message: '发现新版本 1.2.7',
       },
       settings: {
         hotkey: navigator.platform.includes('Mac') ? 'Control+Command+A' : 'Alt+A',
@@ -282,6 +293,7 @@
           : ['Alt+A', 'Control+Shift+A', 'Alt+Shift+A'],
         hotkeyRegistered: true,
         launchAtLogin: false,
+        showTrayIcon: true,
         showMagnifier: true,
       },
     });

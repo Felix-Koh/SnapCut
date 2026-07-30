@@ -23,6 +23,7 @@ const { SettingsStore, platformHotkeys, sanitizeSettings } = require('./settings
 const { displayMetricsAffectCaptureMapping } = require('./display-metrics');
 const { UpdateService, createElectronFetch } = require('./update-service');
 const { prepareMacUpdate } = require('./mac-update');
+const { reconcileTrayVisibility } = require('./tray-visibility');
 const {
   enumerateWindowsWithTimeout,
   preloadWindowEnumerator,
@@ -666,8 +667,8 @@ function trayTooltip(settings) {
     : `${APP_NAME} · 快捷键不可用，可双击截图`;
 }
 
-function rebuildTrayMenu() {
-  if (!tray) return;
+function rebuildTrayMenu(targetTray = tray) {
+  if (!targetTray) return;
   const settings = settingsStore.get();
   const template = [
     {
@@ -723,7 +724,7 @@ function rebuildTrayMenu() {
       },
     },
   );
-  tray.setContextMenu(Menu.buildFromTemplate(template));
+  targetTray.setContextMenu(Menu.buildFromTemplate(template));
 }
 
 function createTray() {
@@ -737,10 +738,19 @@ function createTray() {
       .resize({ width: 18, height: 18 });
   }
   if (isMac()) image.setTemplateImage(true);
-  tray = new Tray(image);
-  tray.setToolTip(trayTooltip(settingsStore.get()));
-  tray.on('double-click', () => startCapture().catch(handleCaptureError));
-  rebuildTrayMenu();
+  const createdTray = new Tray(image);
+  createdTray.setToolTip(trayTooltip(settingsStore.get()));
+  createdTray.on('double-click', () => startCapture().catch(handleCaptureError));
+  rebuildTrayMenu(createdTray);
+  return createdTray;
+}
+
+function syncTrayVisibility(settings = settingsStore.get()) {
+  tray = reconcileTrayVisibility({
+    shouldShow: settings.showTrayIcon,
+    tray,
+    createTray,
+  });
 }
 
 function openScreenPermissionSettings() {
@@ -795,8 +805,11 @@ function installIpcHandlers() {
 
     const next = settingsStore.update(candidate);
     setLaunchAtLogin(next.launchAtLogin);
-    rebuildTrayMenu();
-    if (tray) tray.setToolTip(trayTooltip(next));
+    syncTrayVisibility(next);
+    if (tray) {
+      rebuildTrayMenu();
+      tray.setToolTip(trayTooltip(next));
+    }
     sendSettingsChanged();
     return { ok: true, settings: publicSettings() };
   });
@@ -899,7 +912,7 @@ async function initialize() {
   updateState.currentVersion = app.getVersion();
   registerInitialHotkey(initial.hotkey);
   installIpcHandlers();
-  createTray();
+  syncTrayVisibility(initial);
   const updateCompleted = process.argv.includes('--snapcut-update-complete');
   const updateFailed = process.argv.includes('--snapcut-update-failed');
   if (updateCompleted) {

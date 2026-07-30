@@ -21,6 +21,7 @@ test('sanitizeSettings rejects unknown accelerators and non-booleans', () => {
       {
         hotkey: 'CommandOrControl+Q',
         launchAtLogin: 'yes',
+        showTrayIcon: false,
         showMagnifier: false,
         firstRun: false,
       },
@@ -29,6 +30,7 @@ test('sanitizeSettings rejects unknown accelerators and non-booleans', () => {
     {
       hotkey: 'Alt+A',
       launchAtLogin: false,
+      showTrayIcon: false,
       showMagnifier: false,
       firstRun: false,
     },
@@ -42,9 +44,10 @@ test('SettingsStore recovers from malformed JSON and persists atomically', (t) =
 
   const store = new SettingsStore(directory, 'darwin');
   assert.deepEqual(store.load(), defaultSettings('darwin'));
-  store.update({ hotkey: 'Command+Shift+A', launchAtLogin: true });
+  store.update({ hotkey: 'Command+Shift+A', launchAtLogin: true, showTrayIcon: false });
 
   const persisted = JSON.parse(fs.readFileSync(path.join(directory, 'settings.json'), 'utf8'));
   assert.equal(persisted.hotkey, 'Command+Shift+A');
   assert.equal(persisted.launchAtLogin, true);
+  assert.equal(persisted.showTrayIcon, false);
 });

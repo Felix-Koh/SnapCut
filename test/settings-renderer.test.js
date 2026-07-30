@@ -66,6 +66,9 @@ function createHarness({ startCaptureResult = { ok: true } } = {}) {
     '#quit-button',
     '#releases-button',
     '#status-pill',
+    '#tray-toggle',
+    '#tray-help',
+    '#tray-label',
     '#update-button',
     '#update-detail',
     '#update-progress',
@@ -95,6 +98,7 @@ function createHarness({ startCaptureResult = { ok: true } } = {}) {
       hotkeyOptions: ['Control+Command+A', 'Command+Shift+A', 'Alt+A'],
       hotkeyRegistered: true,
       launchAtLogin: false,
+      showTrayIcon: true,
       showMagnifier: true,
     },
   };
@@ -189,6 +193,23 @@ test('settings renderer serializes rapid changes and preserves them across focus
 
   assert.equal(harness.elements['#launch-toggle'].checked, true);
   assert.equal(harness.elements['#magnifier-toggle'].checked, false);
+});
+
+test('menu bar visibility is persisted while the global shortcut remains available', async () => {
+  const harness = createHarness();
+  await flushTasks();
+
+  assert.equal(harness.elements['#tray-toggle'].checked, true);
+  assert.equal(harness.elements['#tray-label'].textContent, '在菜单栏显示图标');
+  assert.match(harness.elements['#tray-help'].textContent, /重新打开 SnapCut 可恢复/);
+
+  harness.elements['#tray-toggle'].checked = false;
+  harness.elements['#tray-toggle'].dispatch('change');
+
+  assert.deepEqual(Object.keys(harness.requests[0].patch), ['showTrayIcon']);
+  assert.equal(harness.requests[0].patch.showTrayIcon, false);
+  assert.equal(harness.elements['#tray-toggle'].checked, false);
+  assert.equal(harness.elements['#status-pill'].textContent, '后台已就绪');
 });
 
 test('settings renderer restores the returned main-process state after a rejected change', async () => {

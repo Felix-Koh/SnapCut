@@ -14,6 +14,7 @@ function defaultSettings(platform = process.platform) {
   return {
     hotkey: platformHotkeys(platform)[0],
     launchAtLogin: false,
+    showTrayIcon: true,
     showMagnifier: true,
     firstRun: true,
   };
@@ -27,6 +28,8 @@ function sanitizeSettings(candidate, platform = process.platform) {
     hotkey: allowedHotkeys.includes(source.hotkey) ? source.hotkey : defaults.hotkey,
     launchAtLogin:
       typeof source.launchAtLogin === 'boolean' ? source.launchAtLogin : defaults.launchAtLogin,
+    showTrayIcon:
+      typeof source.showTrayIcon === 'boolean' ? source.showTrayIcon : defaults.showTrayIcon,
     showMagnifier:
       typeof source.showMagnifier === 'boolean' ? source.showMagnifier : defaults.showMagnifier,
     firstRun: typeof source.firstRun === 'boolean' ? source.firstRun : defaults.firstRun,
