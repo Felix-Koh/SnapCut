@@ -44,6 +44,30 @@ SnapCut 把常用截图能力集中在一个轻量、独立、常驻后台的桌
 
 不要关闭系统安全功能。Release 同时提供 `SHA256SUMS.txt`，可用于核对安装包是否与发布文件一致。正式推广版本会在取得代码签名证书后补上签名与 Apple 公证。
 
+### macOS 提示“SnapCut 已损坏，无法打开”
+
+当前 macOS 安装包尚未使用 Apple Developer ID 签名和公证。通过浏览器下载后，macOS 会给应用添加隔离标记；Gatekeeper 有时会因此显示“已损坏”或要求将应用移到废纸篓。这不一定代表安装包真的损坏，但在继续前必须先确认文件来自本仓库并通过校验。
+
+1. 只从本仓库的 [GitHub Releases](https://github.com/Felix-Koh/SnapCut/releases) 下载 Apple Silicon DMG，同时下载同一版本的 `SHA256SUMS.txt`。
+2. 在“终端”中核对下载文件。文件名中的版本号变化时，请使用实际下载的文件名：
+
+   ```bash
+   shasum -a 256 ~/Downloads/SnapCut-*-macos-arm64.dmg
+   ```
+
+   输出的 SHA-256 必须与 `SHA256SUMS.txt` 中对应 DMG 的记录完全一致。若不一致，请删除文件并重新下载，不要继续打开。
+3. 打开 DMG，把 `SnapCut.app` 拖入“应用程序”，然后推出 DMG。
+4. 先在 Finder 的“应用程序”中右键 SnapCut，选择“打开”。如果仍然提示“已损坏”，在“终端”中只对 SnapCut 执行：
+
+   ```bash
+   xattr -dr com.apple.quarantine "/Applications/SnapCut.app"
+   open "/Applications/SnapCut.app"
+   ```
+
+   如果 SnapCut 不在 `/Applications`，请把命令中的路径替换为实际位置；也可以在输入 `xattr -dr com.apple.quarantine ` 后，把 `SnapCut.app` 从 Finder 拖入终端，让系统自动填入正确路径。
+
+不要执行全局关闭 Gatekeeper 的命令，也不要对整个“应用程序”目录批量清除隔离属性。以上命令只应在安装包来源和 SHA-256 已确认后，针对 `/Applications/SnapCut.app` 使用。
+
 ## 第一次使用
 
 1. 启动 SnapCut。关闭设置窗口后，程序仍会留在 Windows 托盘或 macOS 菜单栏。
