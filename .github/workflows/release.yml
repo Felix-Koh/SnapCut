@@ -1,0 +1,324 @@
+name: Release desktop apps
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify-version:
+    name: Verify source and release version
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Require tag to match package.json
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const version = require('./package.json').version
+          const expected = `v${version}`
+          const actual = process.env.GITHUB_REF_NAME
+          if (actual !== expected) {
+            console.error(`Tag mismatch: expected ${expected}, got ${actual}`)
+            process.exit(1)
+          }
+          console.log(`Releasing ${actual}`)
+          NODE
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run static checks and unit tests
+        run: npm run check
+
+      - name: Confirm runtime dependency audit
+        run: npm audit --omit=dev --audit-level=high
+
+  build-windows:
+    name: Build Windows x64
+    needs: verify-version
+    runs-on: windows-2025
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Build unsigned NSIS installer
+        run: npm run dist:win
+
+      - name: Launch packaged app smoke test
+        shell: pwsh
+        run: |
+          $app = Get-ChildItem -Path dist -Recurse -Filter SnapCut.exe -File |
+            Where-Object { $_.FullName -match 'win-unpacked' } |
+            Select-Object -First 1
+          if (-not $app) { throw 'Packaged SnapCut.exe was not found' }
+          $process = Start-Process -FilePath $app.FullName -ArgumentList '--hidden' -PassThru
+          Start-Sleep -Seconds 4
+          if ($process.HasExited) {
+            throw "Packaged app exited during smoke test with code $($process.ExitCode)"
+          }
+          Get-Process -Name SnapCut -ErrorAction SilentlyContinue | Stop-Process -Force
+
+      - name: Verify Windows output
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          $expected = Join-Path $PWD "dist/SnapCut-$version-windows-x64.exe"
+          $installers = @(Get-ChildItem -Path dist -Filter *.exe -File)
+          if ($installers.Count -ne 1) {
+            throw "Expected exactly one Windows installer, found $($installers.Count)"
+          }
+          if (-not (Test-Path -LiteralPath $expected -PathType Leaf)) {
+            throw "Expected Windows installer was not found: $expected"
+          }
+          if ($installers[0].FullName -ne $expected) {
+            throw "Unexpected Windows installer name: $($installers[0].Name)"
+          }
+          $installers | ForEach-Object { Write-Host $_.FullName }
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-windows-x64
+          path: dist/SnapCut-*-windows-x64.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+          overwrite: true
+
+  build-macos:
+    name: Build macOS ${{ matrix.arch }}
+    needs: verify-version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            binary_arch: x86_64
+            runner: macos-15-intel
+          - arch: arm64
+            binary_arch: arm64
+            runner: macos-15
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Build unsigned DMG and ZIP
+        run: npm run dist:mac:${{ matrix.arch }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Verify packaged architecture
+        shell: bash
+        run: |
+          executable="$(find dist -type f -path '*/SnapCut.app/Contents/MacOS/SnapCut' -print -quit)"
+          if [[ -z "$executable" ]]; then
+            echo '::error::Packaged SnapCut executable was not found'
+            exit 1
+          fi
+          file "$executable"
+          if ! file "$executable" | grep -q "${{ matrix.binary_arch }}"; then
+            echo '::error::Packaged executable architecture is incorrect'
+            exit 1
+          fi
+
+      - name: Launch packaged app smoke test
+        shell: bash
+        run: |
+          app_path="$(find dist -type d -name 'SnapCut.app' -print -quit)"
+          executable="$app_path/Contents/MacOS/SnapCut"
+          open "$app_path" --args --hidden
+          started=false
+          for attempt in {1..10}; do
+            if pgrep -f "$executable" >/dev/null; then
+              started=true
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$started" != true ]]; then
+            echo '::error::Packaged app did not stay running'
+            exit 1
+          fi
+          pkill -f "$executable" || true
+
+      - name: Verify macOS output
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          expected_dmg="dist/SnapCut-${version}-macos-${{ matrix.arch }}.dmg"
+          expected_zip="dist/SnapCut-${version}-macos-${{ matrix.arch }}.zip"
+          dmg_count="$(find dist -maxdepth 1 -type f -name '*.dmg' | wc -l | tr -d ' ')"
+          zip_count="$(find dist -maxdepth 1 -type f -name '*.zip' | wc -l | tr -d ' ')"
+          if [[ "$dmg_count" != "1" ]]; then
+            echo "::error::Expected exactly one DMG, found $dmg_count"
+            exit 1
+          fi
+          if [[ "$zip_count" != "1" ]]; then
+            echo "::error::Expected exactly one ZIP, found $zip_count"
+            exit 1
+          fi
+          if [[ ! -f "$expected_dmg" || ! -f "$expected_zip" ]]; then
+            echo "::error::Expected macOS packages were not found for ${{ matrix.arch }}"
+            find dist -maxdepth 1 -type f \( -name '*.dmg' -o -name '*.zip' \) -print
+            exit 1
+          fi
+          printf '%s\n' "$expected_dmg" "$expected_zip"
+
+      - name: Upload macOS packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-macos-${{ matrix.arch }}
+          path: |
+            dist/SnapCut-*-macos-${{ matrix.arch }}.dmg
+            dist/SnapCut-*-macos-${{ matrix.arch }}.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+          overwrite: true
+
+  publish-release:
+    name: Assemble and publish GitHub Release
+    needs:
+      - verify-version
+      - build-windows
+      - build-macos
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: write
+      actions: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Validate complete release set
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          expected=(
+            "SnapCut-${version}-windows-x64.exe"
+            "SnapCut-${version}-macos-x64.dmg"
+            "SnapCut-${version}-macos-x64.zip"
+            "SnapCut-${version}-macos-arm64.dmg"
+            "SnapCut-${version}-macos-arm64.zip"
+          )
+          mapfile -t actual < <(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)
+          mapfile -t wanted < <(printf '%s\n' "${expected[@]}" | sort)
+          if [[ "${#actual[@]}" -ne "${#wanted[@]}" ]] || ! diff -u <(printf '%s\n' "${wanted[@]}") <(printf '%s\n' "${actual[@]}"); then
+            echo '::error::Release assets do not match the five required platform packages'
+            exit 1
+          fi
+          printf 'release-assets/%s\n' "${wanted[@]}"
+
+      - name: Generate SHA-256 checksums
+        shell: bash
+        run: |
+          cd release-assets
+          version="${GITHUB_REF_NAME#v}"
+          sha256sum -- \
+            "SnapCut-${version}-windows-x64.exe" \
+            "SnapCut-${version}-macos-x64.dmg" \
+            "SnapCut-${version}-macos-x64.zip" \
+            "SnapCut-${version}-macos-arm64.dmg" \
+            "SnapCut-${version}-macos-arm64.zip" \
+            > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create draft, upload assets, then publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          repo="$GITHUB_REPOSITORY"
+          state="$(gh release view "$tag" --repo "$repo" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
+
+          if [[ "$state" == "false" ]]; then
+            echo "::error::Release $tag is already published; refusing to replace its binaries"
+            exit 1
+          fi
+
+          if [[ -z "$state" ]]; then
+            prerelease_args=()
+            if [[ "$tag" == *-* ]]; then
+              prerelease_args+=(--prerelease)
+            fi
+            gh release create "$tag" \
+              --repo "$repo" \
+              --verify-tag \
+              --draft \
+              --title "SnapCut ${tag#v}" \
+              --notes-file RELEASE_NOTES.md \
+              "${prerelease_args[@]}"
+          else
+            mapfile -t stale_assets < <(
+              gh release view "$tag" --repo "$repo" --json assets --jq '.assets[].name'
+            )
+            for asset in "${stale_assets[@]}"; do
+              gh release delete-asset "$tag" "$asset" --repo "$repo" --yes
+            done
+          fi
+
+          gh release upload "$tag" --repo "$repo" release-assets/* --clobber
+
+          version="${tag#v}"
+          expected=(
+            "SHA256SUMS.txt"
+            "SnapCut-${version}-windows-x64.exe"
+            "SnapCut-${version}-macos-x64.dmg"
+            "SnapCut-${version}-macos-x64.zip"
+            "SnapCut-${version}-macos-arm64.dmg"
+            "SnapCut-${version}-macos-arm64.zip"
+          )
+          mapfile -t remote_assets < <(
+            gh release view "$tag" --repo "$repo" --json assets --jq '.assets[].name' | sort
+          )
+          mapfile -t expected_assets < <(printf '%s\n' "${expected[@]}" | sort)
+          if ! diff -u \
+            <(printf '%s\n' "${expected_assets[@]}") \
+            <(printf '%s\n' "${remote_assets[@]}"); then
+            echo '::error::Draft Release asset set is incomplete or contains unexpected files'
+            exit 1
+          fi
+          gh release edit "$tag" --repo "$repo" --draft=false

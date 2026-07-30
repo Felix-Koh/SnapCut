@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' blob: data:; style-src 'self'; script-src 'self'; worker-src 'self' blob:"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+    <title>SnapCut 截图</title>
+    <link rel="stylesheet" href="overlay.css?v=1.0.0" />
+  </head>
+  <body>
+    <canvas
+      id="capture-canvas"
+      tabindex="0"
+      role="application"
+      aria-label="截图区域。拖动鼠标选择画面，按 Escape 取消。"
+    ></canvas>
+
+    <div class="loading-panel" id="loading-panel" aria-live="polite">
+      <span class="spinner" aria-hidden="true"></span>
+      <span>正在冻结屏幕…</span>
+    </div>
+
+    <div class="instruction" id="instruction">
+      <span>拖动选择区域</span>
+      <span class="instruction-divider" aria-hidden="true"></span>
+      <span>双击选择整屏</span>
+      <kbd>Esc</kbd>
+      <span>取消</span>
+    </div>
+
+    <div class="size-badge" id="size-badge" hidden aria-hidden="true">0 × 0 px</div>
+
+    <aside class="magnifier" id="magnifier" hidden aria-hidden="true">
+      <canvas id="magnifier-canvas" width="120" height="120"></canvas>
+      <div class="magnifier-meta">
+        <span id="pixel-position">0, 0</span>
+        <span class="pixel-color"><i id="pixel-swatch"></i><span id="pixel-hex">#000000</span></span>
+      </div>
+    </aside>
+
+    <div class="toolbar" id="toolbar" role="toolbar" aria-label="截图标注工具" hidden>
+      <button class="tool-button is-active" type="button" data-tool="select" aria-label="选择和移动，快捷键 V" aria-pressed="true" title="选择和移动 (V)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 3 12 9-6 1.5-3 5.5L6 3Z" /></svg>
+      </button>
+      <button class="tool-button" type="button" data-tool="rect" aria-label="矩形工具，快捷键 R" aria-pressed="false" title="矩形 (R)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="1" /></svg>
+      </button>
+      <button class="tool-button" type="button" data-tool="ellipse" aria-label="椭圆工具，快捷键 O" aria-pressed="false" title="椭圆 (O)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="12" rx="8" ry="6.5" /></svg>
+      </button>
+      <button class="tool-button" type="button" data-tool="arrow" aria-label="箭头工具，快捷键 A" aria-pressed="false" title="箭头 (A)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 19 14-14M10 5h9v9" /></svg>
+      </button>
+      <button class="tool-button" type="button" data-tool="pen" aria-label="画笔工具，快捷键 P" aria-pressed="false" title="画笔 (P)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15.5 5.5 3 3M4 20l4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20Z" /></svg>
+      </button>
+      <button class="tool-button" type="button" data-tool="mosaic" aria-label="马赛克工具，快捷键 B" aria-pressed="false" title="马赛克 (B)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" /><rect x="14" y="4" width="6" height="6" /><rect x="4" y="14" width="6" height="6" /><rect x="14" y="14" width="6" height="6" /></svg>
+      </button>
+      <button class="tool-button" type="button" data-tool="text" aria-label="文字工具，快捷键 T" aria-pressed="false" title="文字 (T)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14M12 5v14M8 19h8" /></svg>
+      </button>
+
+      <span class="toolbar-divider" aria-hidden="true"></span>
+
+      <div class="popover-anchor">
+        <button class="tool-button" id="color-button" type="button" aria-label="选择标注颜色" aria-expanded="false" title="颜色">
+          <span class="color-preview" id="color-preview"></span>
+        </button>
+        <div class="popover color-popover" id="color-popover" role="group" aria-label="标注颜色">
+          <button type="button" data-color="#ef4444" aria-label="红色" style="--swatch: #ef4444"></button>
+          <button type="button" data-color="#f59e0b" aria-label="黄色" style="--swatch: #f59e0b"></button>
+          <button type="button" data-color="#0d9488" aria-label="青绿色" style="--swatch: #0d9488"></button>
+          <button type="button" data-color="#3b82f6" aria-label="蓝色" style="--swatch: #3b82f6"></button>
+          <button type="button" data-color="#ffffff" aria-label="白色" style="--swatch: #ffffff"></button>
+          <button type="button" data-color="#111827" aria-label="黑色" style="--swatch: #111827"></button>
+        </div>
+      </div>
+
+      <div class="popover-anchor">
+        <button class="tool-button" id="size-button" type="button" aria-label="选择线条粗细" aria-expanded="false" title="粗细">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path class="size-icon-thin" d="M5 7h14" /><path class="size-icon-thick" d="M5 16h14" /></svg>
+        </button>
+        <div class="popover size-popover" id="size-popover" role="group" aria-label="线条粗细">
+          <button type="button" data-size="0" aria-label="细"><span class="line-sample is-small"></span></button>
+          <button type="button" data-size="1" aria-label="中"><span class="line-sample is-medium"></span></button>
+          <button type="button" data-size="2" aria-label="粗"><span class="line-sample is-large"></span></button>
+        </div>
+      </div>
+
+      <span class="toolbar-divider" aria-hidden="true"></span>
+
+      <button class="tool-button" id="undo-button" type="button" aria-label="撤销，快捷键 Ctrl 或 Command 加 Z" title="撤销" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 8-5 4 5 4" /><path d="M5 12h8a6 6 0 0 1 6 6" /></svg>
+      </button>
+      <button class="tool-button" id="redo-button" type="button" aria-label="重做，快捷键 Ctrl 或 Command 加 Shift 加 Z" title="重做" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 8 5 4-5 4" /><path d="M19 12h-8a6 6 0 0 0-6 6" /></svg>
+      </button>
+
+      <span class="toolbar-divider" aria-hidden="true"></span>
+
+      <button class="tool-button action-button" id="save-button" type="button" aria-label="保存为 PNG，快捷键 Ctrl 或 Command 加 S" title="保存 (Ctrl/⌘ + S)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5V4Z" /><path d="M8 4v6h8V4M8 20v-6h8v6" /></svg>
+      </button>
+      <button class="tool-button action-button cancel-button" id="cancel-button" type="button" aria-label="取消截图，快捷键 Escape" title="取消 (Esc)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+      </button>
+      <button class="copy-button" id="copy-button" type="button" aria-label="复制并完成，快捷键 Enter" title="复制并完成 (Enter)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z" /><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h2" /><path d="m11 15 2 2 4-5" /></svg>
+      </button>
+    </div>
+
+    <textarea
+      id="text-editor"
+      class="text-editor"
+      rows="2"
+      wrap="soft"
+      aria-label="输入截图文字，按 Ctrl 或 Command 加 Enter 完成"
+      placeholder="输入文字"
+      hidden
+    ></textarea>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+    <div class="sr-status" id="sr-status" role="status" aria-live="polite"></div>
+
+    <script src="../shared/geometry.js"></script>
+    <script src="overlay.js"></script>
+  </body>
+</html>

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SnapCut</title>
+    <link rel="stylesheet" href="settings.css?v=1.0.0" />
+  </head>
+  <body>
+    <main class="app-shell" id="main-content">
+      <header class="hero">
+        <div class="brand-row">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 48 48" role="img">
+              <path d="M13 8h10v5H13v10H8V13a5 5 0 0 1 5-5Z" />
+              <path d="M35 8H25v5h10v10h5V13a5 5 0 0 0-5-5Z" />
+              <path d="M13 40h10v-5H13V25H8v10a5 5 0 0 0 5 5Z" />
+              <path d="M40 25h-5v10H25v5h10a5 5 0 0 0 5-5V25Z" />
+              <path class="brand-spark" d="m25 16-9 11h7l-1 7 10-12h-7v-6Z" />
+            </svg>
+          </div>
+          <div>
+            <div class="brand-title-row">
+              <h1>SnapCut</h1>
+              <span
+                class="status-pill"
+                id="status-pill"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >准备中</span>
+            </div>
+            <p>不用打开微信，也能随时截图和标注。</p>
+          </div>
+        </div>
+
+        <button class="capture-button" id="capture-button" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3" />
+            <rect x="7" y="7" width="10" height="10" rx="2" />
+          </svg>
+          <span>立即截图</span>
+          <kbd id="hero-hotkey">—</kbd>
+        </button>
+      </header>
+
+      <div class="error-banner" id="error-banner" role="alert" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v6M12 17h.01" />
+        </svg>
+        <span id="error-message"></span>
+        <button id="dismiss-error" type="button" aria-label="关闭错误提示">关闭</button>
+      </div>
+
+      <section class="settings-card" aria-labelledby="shortcut-heading">
+        <div class="section-heading">
+          <div class="section-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3" /><path d="M7 10h.01M11 10h.01M15 10h2M7 14h6M15 14h2" /></svg>
+          </div>
+          <div>
+            <h2 id="shortcut-heading">全局快捷键</h2>
+            <p>SnapCut 在后台时也能直接呼出。</p>
+          </div>
+        </div>
+        <div class="field-row">
+          <label for="hotkey-select">截图快捷键</label>
+          <select id="hotkey-select" aria-describedby="hotkey-help"></select>
+        </div>
+        <p class="field-help" id="hotkey-help">如果组合键被占用，会自动保留原来的设置。</p>
+      </section>
+
+      <section class="settings-card compact-card" aria-label="常规设置">
+        <label class="toggle-row" for="launch-toggle">
+          <span>
+            <strong>开机时启动</strong>
+            <small>登录系统后安静地驻留在托盘。</small>
+          </span>
+          <span class="toggle">
+            <input id="launch-toggle" type="checkbox" />
+            <span class="toggle-track" aria-hidden="true"><span></span></span>
+          </span>
+        </label>
+        <div class="row-divider"></div>
+        <label class="toggle-row" for="magnifier-toggle">
+          <span>
+            <strong>像素放大镜</strong>
+            <small>拖选时显示坐标、颜色和精确像素。</small>
+          </span>
+          <span class="toggle">
+            <input id="magnifier-toggle" type="checkbox" />
+            <span class="toggle-track" aria-hidden="true"><span></span></span>
+          </span>
+        </label>
+      </section>
+
+      <section class="permission-card" id="permission-card" hidden aria-labelledby="permission-heading">
+        <div class="permission-copy">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.9 8.3 7 10 4.1-1.7 7-5.4 7-10V6l-7-3Z" /><path d="m9 12 2 2 4-5" /></svg>
+          <div>
+            <h2 id="permission-heading">macOS 屏幕录制权限</h2>
+            <p id="permission-copy">首次截图时，macOS 会要求授权。画面只在本机处理。</p>
+          </div>
+        </div>
+        <button class="secondary-button" id="permission-button" type="button">打开系统设置</button>
+      </section>
+
+      <section class="privacy-note" aria-label="隐私说明">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3" /><rect x="4" y="11" width="16" height="10" rx="3" /><path d="M12 15v2" /></svg>
+        <p><strong>截图留在你的电脑里。</strong> SnapCut 不上传截图、不收集使用数据，也不包含广告或遥测。</p>
+      </section>
+
+      <footer>
+        <span id="version-label">SnapCut</span>
+        <div>
+          <button class="text-button" id="releases-button" type="button">GitHub Releases</button>
+          <button class="text-button danger" id="quit-button" type="button">退出 SnapCut</button>
+        </div>
+      </footer>
+    </main>
+    <script src="settings.js"></script>
+  </body>
+</html>

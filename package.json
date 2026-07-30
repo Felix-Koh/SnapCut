@@ -1,0 +1,95 @@
+{
+  "name": "snapcut-desktop",
+  "version": "1.0.0",
+  "description": "A fast, private screenshot and annotation tool for Windows and macOS.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Felix-Koh/SnapCut.git"
+  },
+  "main": "src/main/index.js",
+  "author": {
+    "name": "Felix Koh"
+  },
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "check": "node scripts/check.mjs",
+    "test": "node --test",
+    "icons": "node scripts/generate-icons.mjs",
+    "pack": "npm run check && electron-builder --dir",
+    "dist": "npm run check && electron-builder --publish never",
+    "dist:win": "npm run check && electron-builder --win --x64 --publish never",
+    "dist:mac:x64": "npm run check && electron-builder --mac --x64 --publish never",
+    "dist:mac:arm64": "npm run check && electron-builder --mac --arm64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "43.2.0",
+    "electron-builder": "26.15.3",
+    "png-to-ico": "3.0.2",
+    "sharp": "0.35.3"
+  },
+  "build": {
+    "appId": "com.felixkoh.snapcut",
+    "productName": "SnapCut",
+    "asar": true,
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "build/icon.ico",
+      "package.json",
+      "LICENSE",
+      "PRIVACY.md"
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "icon": "build/icon.icns",
+      "identity": null,
+      "notarize": false,
+      "artifactName": "${productName}-${version}-macos-${arch}.${ext}",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "extendInfo": {
+        "NSScreenCaptureUsageDescription": "SnapCut needs Screen Recording permission only to capture the area you choose.",
+        "NSHumanReadableCopyright": "Copyright © 2026 Felix Koh"
+      }
+    },
+    "dmg": {
+      "title": "SnapCut ${version}",
+      "sign": false
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "artifactName": "${productName}-${version}-windows-${arch}.${ext}",
+      "requestedExecutionLevel": "asInvoker",
+      "signExecutable": false,
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "SnapCut",
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Felix-Koh",
+      "repo": "SnapCut"
+    }
+  }
+}
