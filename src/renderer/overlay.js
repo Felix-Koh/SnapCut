@@ -18,8 +18,16 @@
     colorPopover: document.querySelector('#color-popover'),
     colorPreview: document.querySelector('#color-preview'),
     copy: document.querySelector('#copy-button'),
-    customColor: document.querySelector('#custom-color'),
     customColorButton: document.querySelector('#custom-color-button'),
+    customColorHex: document.querySelector('#custom-color-hex'),
+    customColorHue: document.querySelector('#custom-color-hue'),
+    customColorHueValue: document.querySelector('#custom-color-hue-value'),
+    customColorLightness: document.querySelector('#custom-color-lightness'),
+    customColorLightnessValue: document.querySelector('#custom-color-lightness-value'),
+    customColorPanel: document.querySelector('#custom-color-panel'),
+    customColorPreview: document.querySelector('#custom-color-preview'),
+    customColorSaturation: document.querySelector('#custom-color-saturation'),
+    customColorSaturationValue: document.querySelector('#custom-color-saturation-value'),
     instruction: document.querySelector('#instruction'),
     loading: document.querySelector('#loading-panel'),
     magnifier: document.querySelector('#magnifier'),
@@ -110,6 +118,92 @@
 
   function distance(left, right) {
     return Math.hypot(right.x - left.x, right.y - left.y);
+  }
+
+  function normalizeHexColor(value) {
+    const normalized = String(value || '').trim().toUpperCase();
+    return /^#[0-9A-F]{6}$/.test(normalized) ? normalized : null;
+  }
+
+  function hexToHsl(hex) {
+    const normalized = normalizeHexColor(hex) || '#EF4444';
+    const red = Number.parseInt(normalized.slice(1, 3), 16) / 255;
+    const green = Number.parseInt(normalized.slice(3, 5), 16) / 255;
+    const blue = Number.parseInt(normalized.slice(5, 7), 16) / 255;
+    const max = Math.max(red, green, blue);
+    const min = Math.min(red, green, blue);
+    const lightness = (max + min) / 2;
+    if (max === min) return { hue: 0, saturation: 0, lightness: Math.round(lightness * 100) };
+    const delta = max - min;
+    const saturation = lightness > 0.5
+      ? delta / (2 - max - min)
+      : delta / (max + min);
+    let hue;
+    if (max === red) hue = (green - blue) / delta + (green < blue ? 6 : 0);
+    else if (max === green) hue = (blue - red) / delta + 2;
+    else hue = (red - green) / delta + 4;
+    return {
+      hue: Math.round(hue * 60),
+      saturation: Math.round(saturation * 100),
+      lightness: Math.round(lightness * 100),
+    };
+  }
+
+  function hslToHex(hue, saturation, lightness) {
+    const h = ((Number(hue) % 360) + 360) % 360;
+    const s = geometry.clamp(Number(saturation), 0, 100) / 100;
+    const l = geometry.clamp(Number(lightness), 0, 100) / 100;
+    const chroma = (1 - Math.abs(2 * l - 1)) * s;
+    const segment = h / 60;
+    const x = chroma * (1 - Math.abs((segment % 2) - 1));
+    let red = 0;
+    let green = 0;
+    let blue = 0;
+    if (segment < 1) [red, green] = [chroma, x];
+    else if (segment < 2) [red, green] = [x, chroma];
+    else if (segment < 3) [green, blue] = [chroma, x];
+    else if (segment < 4) [green, blue] = [x, chroma];
+    else if (segment < 5) [red, blue] = [x, chroma];
+    else [red, blue] = [chroma, x];
+    const match = l - chroma / 2;
+    return `#${[red, green, blue]
+      .map((component) => Math.round((component + match) * 255).toString(16).padStart(2, '0'))
+      .join('')}`.toUpperCase();
+  }
+
+  function applyColor(color) {
+    const normalized = normalizeHexColor(color);
+    if (!normalized || state.busy || !state.toolSettings[state.tool]?.color) return false;
+    state.color = normalized.toLowerCase();
+    state.toolSettings[state.tool].color = state.color;
+    elements.textEditor.style.color = state.color;
+    elements.customColorPreview.style.backgroundColor = state.color;
+    elements.customColorHex.value = normalized;
+    updateToolbarState();
+    return true;
+  }
+
+  function syncCustomColorControls(color = state.color) {
+    const normalized = normalizeHexColor(color) || '#EF4444';
+    const hsl = hexToHsl(normalized);
+    elements.customColorHue.value = String(hsl.hue);
+    elements.customColorSaturation.value = String(hsl.saturation);
+    elements.customColorLightness.value = String(hsl.lightness);
+    elements.customColorHueValue.textContent = `${hsl.hue}°`;
+    elements.customColorSaturationValue.textContent = `${hsl.saturation}%`;
+    elements.customColorLightnessValue.textContent = `${hsl.lightness}%`;
+    elements.customColorHex.value = normalized;
+    elements.customColorPreview.style.backgroundColor = normalized;
+  }
+
+  function applyCustomColorControls() {
+    const hue = Number(elements.customColorHue.value);
+    const saturation = Number(elements.customColorSaturation.value);
+    const lightness = Number(elements.customColorLightness.value);
+    elements.customColorHueValue.textContent = `${hue}°`;
+    elements.customColorSaturationValue.textContent = `${saturation}%`;
+    elements.customColorLightnessValue.textContent = `${lightness}%`;
+    applyColor(hslToHex(hue, saturation, lightness));
   }
 
   function physicalScale() {
@@ -571,6 +665,8 @@
         : null;
     elements.colorPopover.classList.remove('is-open');
     elements.sizePopover.classList.remove('is-open');
+    elements.customColorPanel.hidden = true;
+    elements.customColorButton.setAttribute('aria-expanded', 'false');
     elements.colorButton.setAttribute('aria-expanded', 'false');
     elements.sizeButton.setAttribute('aria-expanded', 'false');
     if (restoreFocus) focusTarget?.focus();
@@ -609,7 +705,6 @@
     elements.save.disabled = state.busy;
     elements.cancel.disabled = state.busy;
     elements.colorPreview.style.backgroundColor = state.color;
-    elements.customColor.value = state.color;
     document.querySelectorAll('[data-color]').forEach((button) => {
       const selected = button.dataset.color === state.color;
       button.classList.toggle('is-selected', selected);
@@ -1600,23 +1695,29 @@
   });
   elements.customColorButton.addEventListener('click', () => {
     if (state.busy || !state.toolSettings[state.tool]?.color) return;
-    try {
-      if (typeof elements.customColor.showPicker === 'function') {
-        elements.customColor.showPicker();
-      } else {
-        elements.customColor.click();
-      }
-    } catch {
-      elements.customColor.click();
+    const opening = elements.customColorPanel.hidden;
+    elements.customColorPanel.hidden = !opening;
+    elements.customColorButton.setAttribute('aria-expanded', String(opening));
+    if (opening) {
+      syncCustomColorControls();
+      elements.customColorHue.focus();
     }
+    positionPopover(elements.colorPopover, elements.colorButton);
   });
-  elements.customColor.addEventListener('input', () => {
-    if (state.busy || !state.toolSettings[state.tool]?.color) return;
-    state.color = elements.customColor.value.toLowerCase();
-    state.toolSettings[state.tool].color = state.color;
-    elements.textEditor.style.color = state.color;
-    updateToolbarState();
+  [elements.customColorHue, elements.customColorSaturation, elements.customColorLightness]
+    .forEach((control) => control.addEventListener('input', applyCustomColorControls));
+  elements.customColorHex.addEventListener('input', () => {
+    const normalized = normalizeHexColor(elements.customColorHex.value);
+    if (!normalized || !applyColor(normalized)) return;
+    const hsl = hexToHsl(normalized);
+    elements.customColorHue.value = String(hsl.hue);
+    elements.customColorSaturation.value = String(hsl.saturation);
+    elements.customColorLightness.value = String(hsl.lightness);
+    elements.customColorHueValue.textContent = `${hsl.hue}°`;
+    elements.customColorSaturationValue.textContent = `${hsl.saturation}%`;
+    elements.customColorLightnessValue.textContent = `${hsl.lightness}%`;
   });
+  elements.customColorHex.addEventListener('blur', () => syncCustomColorControls());
   elements.sizeRange.addEventListener('input', () => {
     if (state.busy || !state.toolSettings[state.tool]) return;
     state.toolSettings[state.tool].size = Number(elements.sizeRange.value);
@@ -1667,7 +1768,7 @@
 
   document.addEventListener('keydown', handleKeydown);
   document.addEventListener('pointerdown', (event) => {
-    if (!event.target.closest('.popover-anchor')) closePopovers();
+    if (!event.target.closest('.popover-anchor, .popover')) closePopovers();
   });
   window.addEventListener('resize', () => {
     state.viewSize = { width: window.innerWidth, height: window.innerHeight };

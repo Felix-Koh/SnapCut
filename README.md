@@ -32,8 +32,8 @@ SnapCut 把常用截图能力集中在一个轻量、独立、常驻后台的桌
 
 | 系统 | 文件 | 适用设备 |
 |---|---|---|
-| Windows 10 / 11 | `SnapCut-1.2.0-windows-x64.exe` | 64 位 Intel / AMD 电脑 |
-| macOS Apple Silicon | `SnapCut-1.2.0-macos-arm64.dmg` | macOS 12 或更高版本，M1、M2、M3、M4、M5 等 Mac |
+| Windows 10 / 11 | `SnapCut-1.2.1-windows-x64.exe` | 64 位 Intel / AMD 电脑 |
+| macOS Apple Silicon | `SnapCut-1.2.1-macos-arm64.dmg` | macOS 12 或更高版本，M1、M2、M3、M4、M5 等 Mac |
 
 ### 首版未签名提示
 
@@ -139,7 +139,7 @@ npm run dist:win         # Windows x64
 
 ## 发布
 
-推送与 `package.json` 版本一致的标签（例如 `v1.2.0`）后，GitHub Actions 会：
+推送与 `package.json` 版本一致的标签（例如 `v1.2.1`）后，GitHub Actions 会：
 
 1. 在 Windows 与 Apple Silicon macOS 的原生 Runner 上分别检查、构建并做启动烟雾测试；
 2. 核验 1 个 EXE、1 个 DMG、1 个 ZIP；

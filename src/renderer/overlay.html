@@ -8,7 +8,7 @@
     />
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
     <title>SnapCut 截图</title>
-    <link rel="stylesheet" href="overlay.css?v=1.2.0" />
+    <link rel="stylesheet" href="overlay.css?v=1.2.1" />
   </head>
   <body>
     <canvas
@@ -70,45 +70,12 @@
         <button class="tool-button" id="color-button" type="button" aria-label="选择标注颜色" aria-expanded="false" title="颜色">
           <span class="color-preview" id="color-preview"></span>
         </button>
-        <div class="popover color-popover" id="color-popover" role="group" aria-label="标注颜色">
-          <button type="button" data-color="#ef4444" aria-label="红色"></button>
-          <button type="button" data-color="#f59e0b" aria-label="黄色"></button>
-          <button type="button" data-color="#0d9488" aria-label="青绿色"></button>
-          <button type="button" data-color="#3b82f6" aria-label="蓝色"></button>
-          <button type="button" data-color="#ffffff" aria-label="白色"></button>
-          <button type="button" data-color="#111827" aria-label="黑色"></button>
-          <button
-            class="custom-color-button"
-            id="custom-color-button"
-            type="button"
-            aria-label="自定义颜色"
-            title="自定义颜色"
-          ></button>
-          <input
-            class="custom-color-input"
-            id="custom-color"
-            type="color"
-            value="#ef4444"
-            aria-label="自定义颜色选择器"
-            tabindex="-1"
-          />
-        </div>
       </div>
 
       <div class="popover-anchor">
         <button class="tool-button" id="size-button" type="button" aria-label="选择线条粗细" aria-expanded="false" title="粗细">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path class="size-icon-thin" d="M5 7h14" /><path class="size-icon-thick" d="M5 16h14" /></svg>
         </button>
-        <div class="popover size-popover" id="size-popover" role="group" aria-label="调整粗细">
-          <div class="size-preview" id="size-preview" aria-hidden="true">
-            <span id="size-preview-mark"></span>
-          </div>
-          <label class="size-control" for="size-range">
-            <span id="size-label">线条粗细</span>
-            <input id="size-range" type="range" min="1" max="20" step="0.5" value="4" />
-            <output id="size-value" for="size-range">4 px</output>
-          </label>
-        </div>
       </div>
 
       <span class="toolbar-divider" aria-hidden="true"></span>
@@ -133,6 +100,58 @@
       </button>
     </div>
 
+    <div class="popover color-popover" id="color-popover" role="group" aria-label="标注颜色">
+      <div class="color-swatches">
+        <button type="button" data-color="#ef4444" aria-label="红色"></button>
+        <button type="button" data-color="#f59e0b" aria-label="黄色"></button>
+        <button type="button" data-color="#0d9488" aria-label="青绿色"></button>
+        <button type="button" data-color="#3b82f6" aria-label="蓝色"></button>
+        <button type="button" data-color="#ffffff" aria-label="白色"></button>
+        <button type="button" data-color="#111827" aria-label="黑色"></button>
+        <button
+          class="custom-color-button"
+          id="custom-color-button"
+          type="button"
+          aria-label="自定义颜色"
+          aria-expanded="false"
+          title="自定义颜色"
+        ></button>
+      </div>
+      <div class="custom-color-panel" id="custom-color-panel" hidden>
+        <div class="custom-color-preview" id="custom-color-preview" aria-hidden="true"></div>
+        <label class="custom-color-row" for="custom-color-hue">
+          <span>色相</span>
+          <input id="custom-color-hue" type="range" min="0" max="360" step="1" value="0" />
+          <output id="custom-color-hue-value" for="custom-color-hue">0°</output>
+        </label>
+        <label class="custom-color-row" for="custom-color-saturation">
+          <span>饱和度</span>
+          <input id="custom-color-saturation" type="range" min="0" max="100" step="1" value="82" />
+          <output id="custom-color-saturation-value" for="custom-color-saturation">82%</output>
+        </label>
+        <label class="custom-color-row" for="custom-color-lightness">
+          <span>明度</span>
+          <input id="custom-color-lightness" type="range" min="0" max="100" step="1" value="60" />
+          <output id="custom-color-lightness-value" for="custom-color-lightness">60%</output>
+        </label>
+        <label class="custom-color-hex" for="custom-color-hex">
+          <span>HEX</span>
+          <input id="custom-color-hex" type="text" value="#EF4444" maxlength="7" spellcheck="false" autocomplete="off" />
+        </label>
+      </div>
+    </div>
+
+    <div class="popover size-popover" id="size-popover" role="group" aria-label="调整粗细">
+      <div class="size-preview" id="size-preview" aria-hidden="true">
+        <span id="size-preview-mark"></span>
+      </div>
+      <label class="size-control" for="size-range">
+        <span id="size-label">线条粗细</span>
+        <input id="size-range" type="range" min="1" max="20" step="0.5" value="4" />
+        <output id="size-value" for="size-range">4 px</output>
+      </label>
+    </div>
+
     <textarea
       id="text-editor"
       class="text-editor"
@@ -146,7 +165,7 @@
     <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
     <div class="sr-status" id="sr-status" role="status" aria-live="polite"></div>
 
-    <script src="../shared/geometry.js?v=1.2.0"></script>
-    <script src="overlay.js?v=1.2.0"></script>
+    <script src="../shared/geometry.js?v=1.2.1"></script>
+    <script src="overlay.js?v=1.2.1"></script>
   </body>
 </html>
