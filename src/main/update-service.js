@@ -15,6 +15,16 @@ const ALLOWED_DOWNLOAD_HOSTS = new Set([
   'release-assets.githubusercontent.com',
 ]);
 
+const CERTIFICATE_ERROR_CODES = new Set([
+  'CERT_HAS_EXPIRED',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'ERR_CERT_AUTHORITY_INVALID',
+  'ERR_CERT_DATE_INVALID',
+  'ERR_TLS_CERT_ALTNAME_INVALID',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+]);
+
 function normalizeVersion(value) {
   const normalized = String(value || '').trim().replace(/^v/i, '');
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(normalized)) {
@@ -122,6 +132,92 @@ function checksumForFile(contents, filename) {
   throw new Error('校验文件中没有当前系统的安装包记录');
 }
 
+function readableNetworkError(error) {
+  const code = String(error?.cause?.code || error?.code || '').toUpperCase();
+  const detail = `${error?.message || ''} ${error?.cause?.message || ''}`;
+  const certificateFailure =
+    CERTIFICATE_ERROR_CODES.has(code) ||
+    /(?:CERT_|CERTIFICATE|SELF.SIGNED|UNABLE_TO_VERIFY)/i.test(detail);
+
+  if (certificateFailure) {
+    return new Error(
+      '系统无法验证 GitHub 下载服务器的安全证书，请检查代理、VPN 或系统证书后重试。',
+      { cause: error },
+    );
+  }
+  if (
+    error?.name === 'TypeError' ||
+    /(?:fetch failed|ERR_(?:CONNECTION|NETWORK|PROXY|TIMED_OUT)|ENOTFOUND|ECONN)/i.test(detail)
+  ) {
+    return new Error(
+      '无法连接 GitHub 下载服务器，请检查网络、代理或 VPN 后重试。',
+      { cause: error },
+    );
+  }
+  return error;
+}
+
+function createElectronFetch(electronNet) {
+  if (!electronNet?.request) throw new Error('系统网络服务不可用');
+  return (url, options = {}) => new Promise((resolve, reject) => {
+    const request = electronNet.request({
+      url,
+      method: options.method || 'GET',
+      redirect: 'manual',
+    });
+    let settled = false;
+    let finalUrl = url;
+
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      options.signal?.removeEventListener('abort', abort);
+      callback(value);
+    };
+    const abort = () => {
+      const error = new Error('The operation was aborted');
+      error.name = 'AbortError';
+      request.abort();
+      finish(reject, error);
+    };
+
+    for (const [name, value] of Object.entries(options.headers || {})) {
+      request.setHeader(name, value);
+    }
+    request.on('redirect', (_statusCode, _method, redirectUrl) => {
+      try {
+        finalUrl = assertHttpsUrl(redirectUrl);
+        request.followRedirect();
+      } catch (error) {
+        request.abort();
+        finish(reject, error);
+      }
+    });
+    request.on('response', (response) => {
+      const headers = new Headers();
+      for (const [name, values] of Object.entries(response.headers || {})) {
+        for (const value of Array.isArray(values) ? values : [values]) {
+          if (value !== undefined) headers.append(name, String(value));
+        }
+      }
+      finish(resolve, {
+        ok: response.statusCode >= 200 && response.statusCode < 300,
+        status: response.statusCode,
+        url: finalUrl,
+        headers,
+        body: response,
+      });
+    });
+    request.on('error', (error) => finish(reject, error));
+    if (options.signal?.aborted) {
+      abort();
+      return;
+    }
+    options.signal?.addEventListener('abort', abort, { once: true });
+    request.end();
+  });
+}
+
 async function request(fetchImpl, url, { timeoutMs, maxBytes, accept }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -143,7 +239,7 @@ async function request(fetchImpl, url, { timeoutMs, maxBytes, accept }) {
   } catch (error) {
     clearTimeout(timer);
     if (error?.name === 'AbortError') throw new Error('连接更新服务器超时');
-    throw error;
+    throw readableNetworkError(error);
   }
 }
 
@@ -277,6 +373,8 @@ module.exports = {
   UpdateService,
   checksumForFile,
   compareVersions,
+  createElectronFetch,
   installerName,
+  readableNetworkError,
   validateRelease,
 };

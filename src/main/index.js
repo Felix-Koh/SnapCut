@@ -13,6 +13,7 @@ const {
   globalShortcut,
   ipcMain,
   nativeImage,
+  net,
   screen,
   shell,
   systemPreferences,
@@ -20,7 +21,7 @@ const {
 
 const { SettingsStore, platformHotkeys, sanitizeSettings } = require('./settings-store');
 const { displayMetricsAffectCaptureMapping } = require('./display-metrics');
-const { UpdateService } = require('./update-service');
+const { UpdateService, createElectronFetch } = require('./update-service');
 const {
   enumerateWindowsWithTimeout,
   preloadWindowEnumerator,
@@ -877,6 +878,7 @@ async function initialize() {
     platform: process.platform,
     arch: process.arch,
     tempDirectory: app.getPath('temp'),
+    fetchImpl: createElectronFetch(net),
   });
   updateState.currentVersion = app.getVersion();
   registerInitialHotkey(initial.hotkey);

@@ -4,13 +4,16 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { EventEmitter } = require('node:events');
 const { Readable } = require('node:stream');
 
 const {
   UpdateService,
   checksumForFile,
   compareVersions,
+  createElectronFetch,
   installerName,
+  readableNetworkError,
   validateRelease,
 } = require('../src/main/update-service');
 
@@ -70,6 +73,67 @@ test('checksum parser requires an exact asset filename', () => {
   const hash = 'a'.repeat(64);
   assert.equal(checksumForFile(`${hash}  SnapCut-1.2.0-windows-x64.exe\n`, 'SnapCut-1.2.0-windows-x64.exe'), hash);
   assert.throws(() => checksumForFile(`${hash}  another.exe\n`, 'SnapCut-1.2.0-windows-x64.exe'));
+});
+
+test('updater translates a generic fetch failure into an actionable message', async () => {
+  const fetchImpl = async () => {
+    throw new TypeError('fetch failed');
+  };
+  const service = new UpdateService({
+    currentVersion: '1.2.2',
+    platform: 'darwin',
+    arch: 'arm64',
+    tempDirectory: os.tmpdir(),
+    fetchImpl,
+  });
+
+  await assert.rejects(
+    () => service.check(),
+    /无法连接 GitHub 下载服务器，请检查网络、代理或 VPN 后重试/,
+  );
+});
+
+test('updater explains certificate failures without disabling verification', () => {
+  const failure = new TypeError('fetch failed');
+  failure.cause = Object.assign(new Error('self-signed certificate in certificate chain'), {
+    code: 'SELF_SIGNED_CERT_IN_CHAIN',
+  });
+
+  assert.match(
+    readableNetworkError(failure).message,
+    /无法验证 GitHub 下载服务器的安全证书.*代理、VPN 或系统证书/,
+  );
+});
+
+test('Electron system network adapter rejects redirects outside the trusted hosts', async () => {
+  class FakeRequest extends EventEmitter {
+    setHeader() {}
+
+    abort() {}
+
+    followRedirect() {
+      assert.fail('An untrusted redirect must not be followed');
+    }
+
+    end() {
+      setImmediate(() => this.emit('redirect', 302, 'GET', 'https://example.com/update.exe'));
+    }
+  }
+
+  const systemFetch = createElectronFetch({ request: () => new FakeRequest() });
+  await assert.rejects(
+    () => systemFetch('https://github.com/Felix-Koh/SnapCut/releases/download/v1.2.3/test'),
+    /更新下载地址不受信任/,
+  );
+});
+
+test('main process injects the Electron system network adapter into the updater', async () => {
+  const mainSource = await fs.promises.readFile(
+    path.join(__dirname, '..', 'src', 'main', 'index.js'),
+    'utf8',
+  );
+  assert.match(mainSource, /\bnet,\s*\n\s*screen,/);
+  assert.match(mainSource, /fetchImpl:\s*createElectronFetch\(net\)/);
 });
 
 test('updater downloads, verifies, and atomically keeps a valid installer', async (context) => {

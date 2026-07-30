@@ -1,14 +1,18 @@
-## SnapCut v1.2.2
+## SnapCut v1.2.3
 
 SnapCut 是一个快速、独立、常驻后台的 Windows / macOS 截图工具。
 
 ### 本次更新
 
-- 将颜色和粗细弹层移出工具栏嵌套坐标系，修复缩放和多显示器环境下的错位
-- 自定义颜色不再调用可能被截图置顶层遮挡的系统面板
-- 新增应用内自定义颜色面板，支持色相、饱和度、明度和 HEX 输入
-- 自定义颜色会实时应用到当前画笔、图形、箭头或文字工具
-- 增加弹层结构和自定义颜色面板的自动回归测试
+- 修复点击“下载并升级”后可能出现 `TypeError: fetch failed`、无法下载安装包的问题
+- 更新器改用 Windows / macOS 的系统网络通道，自动沿用系统代理与证书设置
+- 网络或安全证书仍受阻时显示清晰中文提示，便于检查代理、VPN 或系统证书
+- 继续执行 HTTPS 域名限制、安装包大小限制和 SHA-256 完整性校验
+- 增加更新网络失败与系统网络通道的自动回归测试
+
+### 从 1.2.2 升级
+
+如果 `1.2.2` 点击“下载并升级”显示 `TypeError: fetch failed`，请从本 Release 手动下载安装 `1.2.3` 一次。安装完成后，后续版本的一键升级会使用本次修好的系统网络通道。
 
 ### 主要功能
 
@@ -22,8 +26,8 @@ SnapCut 是一个快速、独立、常驻后台的 Windows / macOS 截图工具�
 
 ### 下载哪个文件
 
-- Windows 10 / 11 64 位：`SnapCut-1.2.2-windows-x64.exe`
-- Apple Silicon Mac（M 系列，macOS 12 或更高版本）：`SnapCut-1.2.2-macos-arm64.dmg`
+- Windows 10 / 11 64 位：`SnapCut-1.2.3-windows-x64.exe`
+- Apple Silicon Mac（M 系列，macOS 12 或更高版本）：`SnapCut-1.2.3-macos-arm64.dmg`
 
 ZIP 是 macOS 免挂载压缩包；一般安装优先使用 DMG。
 

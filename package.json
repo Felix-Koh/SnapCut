@@ -1,6 +1,6 @@
 {
   "name": "snapcut-desktop",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "A fast, private screenshot and annotation tool for Windows and macOS.",
   "repository": {
     "type": "git",
@@ -17,6 +17,7 @@
     "dev": "electron . --dev",
     "check": "node scripts/check.mjs",
     "test": "node --test",
+    "smoke:update-network": "electron scripts/smoke-update-network.js",
     "icons": "node scripts/generate-icons.mjs",
     "pack": "npm run check && electron-builder --dir",
     "dist": "npm run check && electron-builder --publish never",
