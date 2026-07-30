@@ -111,7 +111,6 @@ try {
 }
 const macMatrix = workflow?.jobs?.['build-macos']?.strategy?.matrix?.include;
 const expectedMacMatrix = [
-  { arch: 'x64', binary_arch: 'x86_64', runner: 'macos-15-intel' },
   { arch: 'arm64', binary_arch: 'arm64', runner: 'macos-15' },
 ];
 if (

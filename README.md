@@ -1,12 +1,12 @@
 # SnapCut（快截）
 
-无需打开微信，也能随时呼出的 Windows / macOS 截图与标注工具。
+快速、独立、常驻后台的 Windows / macOS 截图与标注工具。
 
 [下载最新版本](https://github.com/Felix-Koh/SnapCut/releases/latest) · [查看隐私说明](PRIVACY.md) · [报告问题](https://github.com/Felix-Koh/SnapCut/issues)
 
 ## 为什么做 SnapCut
 
-很多人已经习惯微信截图的操作方式，但并不想为了截图一直开着微信。SnapCut 把最常用的截图能力做成一个轻量、独立、常驻后台的桌面工具：按快捷键、框选、标注、复制，然后继续手上的工作。
+SnapCut 把常用截图能力集中在一个轻量、独立、常驻后台的桌面工具里：按快捷键、框选、标注、复制，然后继续手上的工作。
 
 截图和标注都在本机完成。SnapCut 不上传图片、不收集使用数据，也不包含广告、账号或云服务。
 
@@ -32,7 +32,6 @@
 |---|---|---|
 | Windows 10 / 11 | `SnapCut-1.0.0-windows-x64.exe` | 64 位 Intel / AMD 电脑 |
 | macOS Apple Silicon | `SnapCut-1.0.0-macos-arm64.dmg` | macOS 12 或更高版本，M1、M2、M3、M4、M5 等 Mac |
-| macOS Intel | `SnapCut-1.0.0-macos-x64.dmg` | macOS 12 或更高版本，Intel Mac |
 
 ### 首版未签名提示
 
@@ -98,7 +97,6 @@ npm run icons
 
 ```bash
 npm run dist:mac:arm64   # Apple Silicon Mac
-npm run dist:mac:x64     # Intel Mac
 npm run dist:win         # Windows x64
 ```
 
@@ -108,8 +106,8 @@ npm run dist:win         # Windows x64
 
 推送与 `package.json` 版本一致的标签（例如 `v1.0.0`）后，GitHub Actions 会：
 
-1. 在 Windows 与两种 macOS 架构的原生 Runner 上分别检查、构建并做启动烟雾测试；
-2. 核验 1 个 EXE、2 个 DMG、2 个 ZIP；
+1. 在 Windows 与 Apple Silicon macOS 的原生 Runner 上分别检查、构建并做启动烟雾测试；
+2. 核验 1 个 EXE、1 个 DMG、1 个 ZIP；
 3. 生成 SHA-256 校验文件；
 4. 所有文件齐全后才发布 GitHub Release，避免用户下载到半成品。
 

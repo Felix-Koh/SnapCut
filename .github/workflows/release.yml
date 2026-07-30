@@ -116,9 +116,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - arch: x64
-            binary_arch: x86_64
-            runner: macos-15-intel
           - arch: arm64
             binary_arch: arm64
             runner: macos-15
@@ -238,15 +235,13 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           expected=(
             "SnapCut-${version}-windows-x64.exe"
-            "SnapCut-${version}-macos-x64.dmg"
-            "SnapCut-${version}-macos-x64.zip"
             "SnapCut-${version}-macos-arm64.dmg"
             "SnapCut-${version}-macos-arm64.zip"
           )
           mapfile -t actual < <(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)
           mapfile -t wanted < <(printf '%s\n' "${expected[@]}" | sort)
           if [[ "${#actual[@]}" -ne "${#wanted[@]}" ]] || ! diff -u <(printf '%s\n' "${wanted[@]}") <(printf '%s\n' "${actual[@]}"); then
-            echo '::error::Release assets do not match the five required platform packages'
+            echo '::error::Release assets do not match the three required platform packages'
             exit 1
           fi
           printf 'release-assets/%s\n' "${wanted[@]}"
@@ -258,8 +253,6 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           sha256sum -- \
             "SnapCut-${version}-windows-x64.exe" \
-            "SnapCut-${version}-macos-x64.dmg" \
-            "SnapCut-${version}-macos-x64.zip" \
             "SnapCut-${version}-macos-arm64.dmg" \
             "SnapCut-${version}-macos-arm64.zip" \
             > SHA256SUMS.txt
@@ -306,8 +299,6 @@ jobs:
           expected=(
             "SHA256SUMS.txt"
             "SnapCut-${version}-windows-x64.exe"
-            "SnapCut-${version}-macos-x64.dmg"
-            "SnapCut-${version}-macos-x64.zip"
             "SnapCut-${version}-macos-arm64.dmg"
             "SnapCut-${version}-macos-arm64.zip"
           )
