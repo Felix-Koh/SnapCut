@@ -19,15 +19,12 @@
     colorPreview: document.querySelector('#color-preview'),
     copy: document.querySelector('#copy-button'),
     customColorButton: document.querySelector('#custom-color-button'),
+    customColorField: document.querySelector('#custom-color-field'),
     customColorHex: document.querySelector('#custom-color-hex'),
     customColorHue: document.querySelector('#custom-color-hue'),
-    customColorHueValue: document.querySelector('#custom-color-hue-value'),
-    customColorLightness: document.querySelector('#custom-color-lightness'),
-    customColorLightnessValue: document.querySelector('#custom-color-lightness-value'),
     customColorPanel: document.querySelector('#custom-color-panel'),
     customColorPreview: document.querySelector('#custom-color-preview'),
-    customColorSaturation: document.querySelector('#custom-color-saturation'),
-    customColorSaturationValue: document.querySelector('#custom-color-saturation-value'),
+    customColorThumb: document.querySelector('#custom-color-thumb'),
     instruction: document.querySelector('#instruction'),
     loading: document.querySelector('#loading-panel'),
     magnifier: document.querySelector('#magnifier'),
@@ -125,35 +122,34 @@
     return /^#[0-9A-F]{6}$/.test(normalized) ? normalized : null;
   }
 
-  function hexToHsl(hex) {
+  function hexToHsv(hex) {
     const normalized = normalizeHexColor(hex) || '#EF4444';
     const red = Number.parseInt(normalized.slice(1, 3), 16) / 255;
     const green = Number.parseInt(normalized.slice(3, 5), 16) / 255;
     const blue = Number.parseInt(normalized.slice(5, 7), 16) / 255;
     const max = Math.max(red, green, blue);
     const min = Math.min(red, green, blue);
-    const lightness = (max + min) / 2;
-    if (max === min) return { hue: 0, saturation: 0, lightness: Math.round(lightness * 100) };
     const delta = max - min;
-    const saturation = lightness > 0.5
-      ? delta / (2 - max - min)
-      : delta / (max + min);
-    let hue;
-    if (max === red) hue = (green - blue) / delta + (green < blue ? 6 : 0);
-    else if (max === green) hue = (blue - red) / delta + 2;
-    else hue = (red - green) / delta + 4;
+    let hue = 0;
+    if (delta > 0) {
+      if (max === red) hue = ((green - blue) / delta) % 6;
+      else if (max === green) hue = (blue - red) / delta + 2;
+      else hue = (red - green) / delta + 4;
+      hue *= 60;
+      if (hue < 0) hue += 360;
+    }
     return {
-      hue: Math.round(hue * 60),
-      saturation: Math.round(saturation * 100),
-      lightness: Math.round(lightness * 100),
+      hue: Math.round(hue),
+      saturation: Math.round((max === 0 ? 0 : delta / max) * 100),
+      value: Math.round(max * 100),
     };
   }
 
-  function hslToHex(hue, saturation, lightness) {
+  function hsvToHex(hue, saturation, value) {
     const h = ((Number(hue) % 360) + 360) % 360;
     const s = geometry.clamp(Number(saturation), 0, 100) / 100;
-    const l = geometry.clamp(Number(lightness), 0, 100) / 100;
-    const chroma = (1 - Math.abs(2 * l - 1)) * s;
+    const v = geometry.clamp(Number(value), 0, 100) / 100;
+    const chroma = v * s;
     const segment = h / 60;
     const x = chroma * (1 - Math.abs((segment % 2) - 1));
     let red = 0;
@@ -165,7 +161,7 @@
     else if (segment < 4) [green, blue] = [x, chroma];
     else if (segment < 5) [red, blue] = [x, chroma];
     else [red, blue] = [chroma, x];
-    const match = l - chroma / 2;
+    const match = v - chroma;
     return `#${[red, green, blue]
       .map((component) => Math.round((component + match) * 255).toString(16).padStart(2, '0'))
       .join('')}`.toUpperCase();
@@ -185,25 +181,42 @@
 
   function syncCustomColorControls(color = state.color) {
     const normalized = normalizeHexColor(color) || '#EF4444';
-    const hsl = hexToHsl(normalized);
-    elements.customColorHue.value = String(hsl.hue);
-    elements.customColorSaturation.value = String(hsl.saturation);
-    elements.customColorLightness.value = String(hsl.lightness);
-    elements.customColorHueValue.textContent = `${hsl.hue}°`;
-    elements.customColorSaturationValue.textContent = `${hsl.saturation}%`;
-    elements.customColorLightnessValue.textContent = `${hsl.lightness}%`;
+    const hsv = hexToHsv(normalized);
+    elements.customColorHue.value = String(hsv.hue);
+    elements.customColorField.dataset.saturation = String(hsv.saturation);
+    elements.customColorField.dataset.value = String(hsv.value);
+    elements.customColorField.style.setProperty('--picker-hue', String(hsv.hue));
+    elements.customColorThumb.style.left = `${hsv.saturation}%`;
+    elements.customColorThumb.style.top = `${100 - hsv.value}%`;
+    elements.customColorField.setAttribute(
+      'aria-valuetext',
+      `饱和度 ${hsv.saturation}%，明度 ${hsv.value}%`,
+    );
     elements.customColorHex.value = normalized;
     elements.customColorPreview.style.backgroundColor = normalized;
   }
 
-  function applyCustomColorControls() {
+  function applyCustomColorPicker() {
     const hue = Number(elements.customColorHue.value);
-    const saturation = Number(elements.customColorSaturation.value);
-    const lightness = Number(elements.customColorLightness.value);
-    elements.customColorHueValue.textContent = `${hue}°`;
-    elements.customColorSaturationValue.textContent = `${saturation}%`;
-    elements.customColorLightnessValue.textContent = `${lightness}%`;
-    applyColor(hslToHex(hue, saturation, lightness));
+    const saturation = Number(elements.customColorField.dataset.saturation || 0);
+    const value = Number(elements.customColorField.dataset.value || 100);
+    elements.customColorField.style.setProperty('--picker-hue', String(hue));
+    elements.customColorThumb.style.left = `${saturation}%`;
+    elements.customColorThumb.style.top = `${100 - value}%`;
+    elements.customColorField.setAttribute(
+      'aria-valuetext',
+      `饱和度 ${Math.round(saturation)}%，明度 ${Math.round(value)}%`,
+    );
+    applyColor(hsvToHex(hue, saturation, value));
+  }
+
+  function setCustomColorFromPointer(event) {
+    const rect = elements.customColorField.getBoundingClientRect();
+    const saturation = geometry.clamp(((event.clientX - rect.left) / rect.width) * 100, 0, 100);
+    const value = geometry.clamp(100 - ((event.clientY - rect.top) / rect.height) * 100, 0, 100);
+    elements.customColorField.dataset.saturation = String(saturation);
+    elements.customColorField.dataset.value = String(value);
+    applyCustomColorPicker();
   }
 
   function physicalScale() {
@@ -626,11 +639,13 @@
     if (!popover.classList.contains('is-open')) return;
     const buttonRect = button.getBoundingClientRect();
     const popoverRect = popover.getBoundingClientRect();
+    const viewportWidth = document.documentElement.clientWidth;
+    const viewportHeight = document.documentElement.clientHeight;
     const gap = 9;
     const left = geometry.clamp(
       buttonRect.left + buttonRect.width / 2 - popoverRect.width / 2,
       8,
-      Math.max(8, state.viewSize.width - popoverRect.width - 8),
+      Math.max(8, viewportWidth - popoverRect.width - 8),
     );
     const above = buttonRect.top - popoverRect.height - gap;
     const below = buttonRect.bottom + gap;
@@ -639,7 +654,7 @@
       : geometry.clamp(
         below,
         8,
-        Math.max(8, state.viewSize.height - popoverRect.height - 8),
+        Math.max(8, viewportHeight - popoverRect.height - 8),
       );
     popover.style.left = `${Math.round(left)}px`;
     popover.style.top = `${Math.round(top)}px`;
@@ -680,7 +695,6 @@
       popover.classList.add('is-open');
       button.setAttribute('aria-expanded', 'true');
       positionPopover(popover, button);
-      popover.querySelector('button, input')?.focus();
     }
   }
 
@@ -711,6 +725,7 @@
       button.setAttribute('aria-pressed', String(selected));
       button.disabled = state.busy;
     });
+    elements.customColorButton.classList.toggle('is-selected', !COLORS.includes(state.color));
     const sizeConfig = state.tool === 'text'
       ? { min: 12, max: 72, step: 1, label: '文字大小' }
       : state.tool === 'mosaic'
@@ -1700,22 +1715,42 @@
     elements.customColorButton.setAttribute('aria-expanded', String(opening));
     if (opening) {
       syncCustomColorControls();
-      elements.customColorHue.focus();
     }
     positionPopover(elements.colorPopover, elements.colorButton);
   });
-  [elements.customColorHue, elements.customColorSaturation, elements.customColorLightness]
-    .forEach((control) => control.addEventListener('input', applyCustomColorControls));
+  elements.customColorHue.addEventListener('input', applyCustomColorPicker);
+  elements.customColorField.addEventListener('pointerdown', (event) => {
+    if (state.busy) return;
+    event.preventDefault();
+    elements.customColorField.setPointerCapture(event.pointerId);
+    setCustomColorFromPointer(event);
+  });
+  elements.customColorField.addEventListener('pointermove', (event) => {
+    if (!elements.customColorField.hasPointerCapture(event.pointerId)) return;
+    setCustomColorFromPointer(event);
+  });
+  elements.customColorField.addEventListener('keydown', (event) => {
+    const saturation = Number(elements.customColorField.dataset.saturation || 0);
+    const value = Number(elements.customColorField.dataset.value || 100);
+    const step = event.shiftKey ? 10 : 1;
+    let nextSaturation = saturation;
+    let nextValue = value;
+    if (event.key === 'ArrowLeft') nextSaturation -= step;
+    else if (event.key === 'ArrowRight') nextSaturation += step;
+    else if (event.key === 'ArrowUp') nextValue += step;
+    else if (event.key === 'ArrowDown') nextValue -= step;
+    else return;
+    event.preventDefault();
+    elements.customColorField.dataset.saturation = String(
+      geometry.clamp(nextSaturation, 0, 100),
+    );
+    elements.customColorField.dataset.value = String(geometry.clamp(nextValue, 0, 100));
+    applyCustomColorPicker();
+  });
   elements.customColorHex.addEventListener('input', () => {
     const normalized = normalizeHexColor(elements.customColorHex.value);
     if (!normalized || !applyColor(normalized)) return;
-    const hsl = hexToHsl(normalized);
-    elements.customColorHue.value = String(hsl.hue);
-    elements.customColorSaturation.value = String(hsl.saturation);
-    elements.customColorLightness.value = String(hsl.lightness);
-    elements.customColorHueValue.textContent = `${hsl.hue}°`;
-    elements.customColorSaturationValue.textContent = `${hsl.saturation}%`;
-    elements.customColorLightnessValue.textContent = `${hsl.lightness}%`;
+    syncCustomColorControls(normalized);
   });
   elements.customColorHex.addEventListener('blur', () => syncCustomColorControls());
   elements.sizeRange.addEventListener('input', () => {

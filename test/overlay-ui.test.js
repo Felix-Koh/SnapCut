@@ -22,11 +22,24 @@ test('annotation popovers live outside the toolbar coordinate context', () => {
   assert.match(css, /\.popover\s*{[\s\S]*?position:\s*fixed;[\s\S]*?z-index:\s*60;/);
 });
 
-test('custom color uses an in-app panel that stays above the capture overlay', () => {
+test('custom color uses a visual in-app color field that stays above the capture overlay', () => {
   assert.match(html, /id="custom-color-button"[\s\S]*?aria-expanded="false"/);
-  assert.match(html, /id="custom-color-panel"[\s\S]*?id="custom-color-hue"[\s\S]*?id="custom-color-hex"/);
+  assert.match(html, /id="custom-color-button"[\s\S]*?class="custom-color-rainbow"/);
+  assert.match(html, /id="custom-color-panel"[\s\S]*?id="custom-color-field"[\s\S]*?id="custom-color-hue"[\s\S]*?id="custom-color-hex"/);
   assert.doesNotMatch(html, /type="color"/);
-  assert.match(css, /\.custom-color-panel\s*{[\s\S]*?width:\s*276px;/);
-  assert.match(script, /function hslToHex\(/);
+  assert.match(css, /\.custom-color-field\s*{[\s\S]*?linear-gradient\(to top, #000, transparent\)/);
+  assert.match(css, /\.custom-color-rainbow\s*{[\s\S]*?conic-gradient\(/);
+  assert.match(script, /function hsvToHex\(/);
+  assert.match(script, /function setCustomColorFromPointer\(/);
   assert.doesNotMatch(script, /\.showPicker\(/);
+});
+
+test('color selection ring follows the circular swatch and pointer opening does not steal focus', () => {
+  assert.match(css, /button\[data-color\]\.is-selected::before\s*{[\s\S]*?var\(--primary-bright\)/);
+  assert.doesNotMatch(script, /popover\.querySelector\('button, input'\)\?\.focus\(\)/);
+});
+
+test('popover clamping uses the actual CSS viewport', () => {
+  assert.match(script, /const viewportWidth = document\.documentElement\.clientWidth/);
+  assert.match(script, /const viewportHeight = document\.documentElement\.clientHeight/);
 });

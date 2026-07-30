@@ -8,7 +8,7 @@
     />
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
     <title>SnapCut 截图</title>
-    <link rel="stylesheet" href="overlay.css?v=1.2.3" />
+    <link rel="stylesheet" href="overlay.css?v=1.2.4" />
   </head>
   <body>
     <canvas
@@ -115,29 +115,30 @@
           aria-label="自定义颜色"
           aria-expanded="false"
           title="自定义颜色"
-        ></button>
+        ><span class="custom-color-rainbow" aria-hidden="true"></span></button>
       </div>
       <div class="custom-color-panel" id="custom-color-panel" hidden>
-        <div class="custom-color-preview" id="custom-color-preview" aria-hidden="true"></div>
-        <label class="custom-color-row" for="custom-color-hue">
-          <span>色相</span>
-          <input id="custom-color-hue" type="range" min="0" max="360" step="1" value="0" />
-          <output id="custom-color-hue-value" for="custom-color-hue">0°</output>
+        <div
+          class="custom-color-field"
+          id="custom-color-field"
+          role="slider"
+          tabindex="0"
+          aria-label="颜色色盘，左右调整饱和度，上下调整明暗"
+          aria-valuetext=""
+        >
+          <span class="custom-color-thumb" id="custom-color-thumb" aria-hidden="true"></span>
+        </div>
+        <label class="custom-color-hue" for="custom-color-hue">
+          <span class="sr-only">色相</span>
+          <input id="custom-color-hue" type="range" min="0" max="360" step="1" value="0" aria-label="色相" />
         </label>
-        <label class="custom-color-row" for="custom-color-saturation">
-          <span>饱和度</span>
-          <input id="custom-color-saturation" type="range" min="0" max="100" step="1" value="82" />
-          <output id="custom-color-saturation-value" for="custom-color-saturation">82%</output>
-        </label>
-        <label class="custom-color-row" for="custom-color-lightness">
-          <span>明度</span>
-          <input id="custom-color-lightness" type="range" min="0" max="100" step="1" value="60" />
-          <output id="custom-color-lightness-value" for="custom-color-lightness">60%</output>
-        </label>
-        <label class="custom-color-hex" for="custom-color-hex">
-          <span>HEX</span>
+        <div class="custom-color-footer">
+          <div class="custom-color-preview" id="custom-color-preview" aria-hidden="true"></div>
+          <label class="custom-color-hex" for="custom-color-hex">
+          <span>颜色值</span>
           <input id="custom-color-hex" type="text" value="#EF4444" maxlength="7" spellcheck="false" autocomplete="off" />
-        </label>
+          </label>
+        </div>
       </div>
     </div>
 
@@ -165,7 +166,7 @@
     <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
     <div class="sr-status" id="sr-status" role="status" aria-live="polite"></div>
 
-    <script src="../shared/geometry.js?v=1.2.3"></script>
-    <script src="overlay.js?v=1.2.3"></script>
+    <script src="../shared/geometry.js?v=1.2.4"></script>
+    <script src="overlay.js?v=1.2.4"></script>
   </body>
 </html>
