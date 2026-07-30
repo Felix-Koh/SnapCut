@@ -187,6 +187,7 @@ textarea {
 }
 
 .toolbar[hidden],
+.popover-anchor[hidden],
 .magnifier[hidden],
 .size-badge[hidden],
 .toast[hidden],
@@ -194,6 +195,17 @@ textarea {
 .loading-panel[hidden],
 .instruction[hidden] {
   display: none;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .tool-button,
@@ -324,43 +336,66 @@ textarea {
   height: 17px;
   border: 2px solid rgb(255 255 255 / 72%);
   border-radius: 50%;
-  background: var(--swatch);
+  background: #ef4444;
   box-shadow: 0 0 0 1px rgb(0 0 0 / 55%);
 }
+
+.color-popover button[data-color="#f59e0b"]::before { background: #f59e0b; }
+.color-popover button[data-color="#0d9488"]::before { background: #0d9488; }
+.color-popover button[data-color="#3b82f6"]::before { background: #3b82f6; }
+.color-popover button[data-color="#ffffff"]::before { background: #ffffff; }
+.color-popover button[data-color="#111827"]::before { background: #111827; }
 
 .color-popover button.is-selected {
   border-color: var(--primary-bright);
   background: rgb(13 148 136 / 25%);
 }
 
-.size-popover button {
-  width: 38px;
-  height: 30px;
+.custom-color {
+  position: relative;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 24%);
   border-radius: 7px;
+  background: conic-gradient(#ef4444, #f59e0b, #22c55e, #3b82f6, #a855f7, #ef4444);
+  cursor: pointer;
 }
 
-.size-popover button.is-selected {
-  border-color: var(--primary-bright);
-  background: rgb(13 148 136 / 25%);
+.custom-color input {
+  width: 42px;
+  height: 42px;
+  opacity: 0;
+  cursor: pointer;
 }
 
-.line-sample {
-  display: block;
-  width: 23px;
-  border-radius: 999px;
-  background: currentColor;
+.size-popover {
+  min-width: 250px;
 }
 
-.line-sample.is-small {
-  height: 2px;
+.size-control {
+  display: grid;
+  width: 100%;
+  grid-template-columns: auto minmax(118px, 1fr) 48px;
+  align-items: center;
+  gap: 9px;
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
-.line-sample.is-medium {
-  height: 4px;
+.size-control input[type="range"] {
+  width: 100%;
+  accent-color: var(--primary-bright);
+  cursor: pointer;
 }
 
-.line-sample.is-large {
-  height: 7px;
+.size-control output {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .cancel-button:hover {

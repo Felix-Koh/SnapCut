@@ -13,10 +13,12 @@
 
   const elements = {
     cancel: document.querySelector('#cancel-button'),
+    colorAnchor: document.querySelector('#color-anchor'),
     colorButton: document.querySelector('#color-button'),
     colorPopover: document.querySelector('#color-popover'),
     colorPreview: document.querySelector('#color-preview'),
     copy: document.querySelector('#copy-button'),
+    customColor: document.querySelector('#custom-color'),
     instruction: document.querySelector('#instruction'),
     loading: document.querySelector('#loading-panel'),
     magnifier: document.querySelector('#magnifier'),
@@ -27,7 +29,10 @@
     save: document.querySelector('#save-button'),
     sizeBadge: document.querySelector('#size-badge'),
     sizeButton: document.querySelector('#size-button'),
+    sizeLabel: document.querySelector('#size-label'),
     sizePopover: document.querySelector('#size-popover'),
+    sizeRange: document.querySelector('#size-range'),
+    sizeValue: document.querySelector('#size-value'),
     srStatus: document.querySelector('#sr-status'),
     textEditor: document.querySelector('#text-editor'),
     toast: document.querySelector('#toast'),
@@ -35,9 +40,6 @@
     undo: document.querySelector('#undo-button'),
   };
 
-  const STROKE_SIZES = [2, 4, 7];
-  const MOSAIC_SIZES = [14, 24, 38];
-  const FONT_SIZES = [16, 22, 30];
   const MIN_SELECTION_SIZE = 8;
   const HANDLE_RADIUS = 9;
   const COLORS = ['#ef4444', '#f59e0b', '#0d9488', '#3b82f6', '#ffffff', '#111827'];
@@ -48,10 +50,19 @@
     viewSize: { width: window.innerWidth, height: window.innerHeight },
     pixelSize: { width: 0, height: 0 },
     selection: null,
+    windowRects: [],
+    hoverWindow: null,
     phase: 'idle',
     tool: 'select',
     color: COLORS[0],
-    sizeIndex: 1,
+    toolSettings: {
+      rect: { color: COLORS[0], size: 4 },
+      ellipse: { color: COLORS[0], size: 4 },
+      arrow: { color: COLORS[0], size: 4 },
+      pen: { color: COLORS[0], size: 4 },
+      mosaic: { size: 24 },
+      text: { color: COLORS[0], size: 22 },
+    },
     annotations: [],
     redoStack: [],
     draft: null,
@@ -66,6 +77,7 @@
     magnifierEnabled: true,
     textAnchor: null,
     textEditorMaxHeight: 180,
+    textEditorSession: 0,
     isComposing: false,
     busy: false,
     toastTimer: null,
@@ -179,15 +191,19 @@
   }
 
   function selectedStrokeSize() {
-    return STROKE_SIZES[state.sizeIndex];
+    return state.toolSettings[state.tool]?.size || 4;
   }
 
   function selectedMosaicSize() {
-    return MOSAIC_SIZES[state.sizeIndex];
+    return state.toolSettings.mosaic.size;
   }
 
   function selectedFontSize() {
-    return FONT_SIZES[state.sizeIndex];
+    return state.toolSettings.text.size;
+  }
+
+  function windowAtPoint(point) {
+    return state.windowRects.find((rect) => geometry.containsPoint(rect, point)) || null;
   }
 
   function setCanvasTransform() {
@@ -394,7 +410,28 @@
     context.imageSmoothingEnabled = true;
     context.drawImage(state.image, 0, 0, state.viewSize.width, state.viewSize.height);
 
-    if (!state.selection) {
+    if (!state.selection && state.hoverWindow) {
+      context.save();
+      context.fillStyle = 'rgba(0, 0, 0, 0.43)';
+      context.beginPath();
+      context.rect(0, 0, state.viewSize.width, state.viewSize.height);
+      context.rect(
+        state.hoverWindow.x,
+        state.hoverWindow.y,
+        state.hoverWindow.width,
+        state.hoverWindow.height,
+      );
+      context.fill('evenodd');
+      context.strokeStyle = '#2dd4bf';
+      context.lineWidth = 1.5;
+      context.strokeRect(
+        state.hoverWindow.x + 0.5,
+        state.hoverWindow.y + 0.5,
+        state.hoverWindow.width - 1,
+        state.hoverWindow.height - 1,
+      );
+      context.restore();
+    } else if (!state.selection) {
       context.fillStyle = 'rgba(0, 0, 0, 0.43)';
       context.fillRect(0, 0, state.viewSize.width, state.viewSize.height);
     } else {
@@ -457,7 +494,10 @@
       elements.toolbar.hidden = true;
       elements.sizeBadge.hidden = true;
       elements.instruction.hidden = false;
-      canvas.setAttribute('aria-label', '截图区域。拖动鼠标选择画面，按 Escape 取消。');
+      canvas.setAttribute(
+        'aria-label',
+        '截图区域。单击选择窗口，拖动自由框选，按 Escape 取消。',
+      );
       return;
     }
 
@@ -517,7 +557,7 @@
     if (opening) {
       popover.classList.add('is-open');
       button.setAttribute('aria-expanded', 'true');
-      popover.querySelector('button')?.focus();
+      popover.querySelector('button, input')?.focus();
     }
   }
 
@@ -530,24 +570,37 @@
     });
     elements.undo.disabled = state.busy || state.annotations.length === 0;
     elements.redo.disabled = state.busy || state.redoStack.length === 0;
-    elements.colorButton.disabled = state.busy;
-    elements.sizeButton.disabled = state.busy;
+    const settings = state.toolSettings[state.tool];
+    const supportsColor = Boolean(settings?.color);
+    const supportsSize = Boolean(settings);
+    if (supportsColor) state.color = settings.color;
+    elements.colorAnchor.hidden = !supportsColor;
+    elements.sizeButton.closest('.popover-anchor').hidden = !supportsSize;
+    elements.colorButton.disabled = state.busy || !supportsColor;
+    elements.sizeButton.disabled = state.busy || !supportsSize;
     elements.copy.disabled = state.busy;
     elements.save.disabled = state.busy;
     elements.cancel.disabled = state.busy;
-    elements.colorPreview.style.background = state.color;
+    elements.colorPreview.style.backgroundColor = state.color;
+    elements.customColor.value = state.color;
     document.querySelectorAll('[data-color]').forEach((button) => {
       const selected = button.dataset.color === state.color;
       button.classList.toggle('is-selected', selected);
       button.setAttribute('aria-pressed', String(selected));
       button.disabled = state.busy;
     });
-    document.querySelectorAll('[data-size]').forEach((button) => {
-      const selected = Number(button.dataset.size) === state.sizeIndex;
-      button.classList.toggle('is-selected', selected);
-      button.setAttribute('aria-pressed', String(selected));
-      button.disabled = state.busy;
-    });
+    const sizeConfig = state.tool === 'text'
+      ? { min: 12, max: 72, step: 1, label: '文字大小' }
+      : state.tool === 'mosaic'
+        ? { min: 6, max: 64, step: 1, label: '马赛克笔刷' }
+        : { min: 1, max: 20, step: 0.5, label: '线条粗细' };
+    elements.sizeRange.min = String(sizeConfig.min);
+    elements.sizeRange.max = String(sizeConfig.max);
+    elements.sizeRange.step = String(sizeConfig.step);
+    elements.sizeRange.value = String(settings?.size ?? 4);
+    elements.sizeRange.disabled = state.busy || !supportsSize;
+    elements.sizeLabel.textContent = sizeConfig.label;
+    elements.sizeValue.textContent = `${settings?.size ?? 4} px`;
     elements.sizeButton.setAttribute(
       'aria-label',
       state.tool === 'text'
@@ -563,6 +616,7 @@
     if (!['select', 'rect', 'ellipse', 'arrow', 'pen', 'mosaic', 'text'].includes(tool)) return;
     if (!elements.textEditor.hidden) commitText();
     state.tool = tool;
+    if (state.toolSettings[tool]?.color) state.color = state.toolSettings[tool].color;
     state.draft = null;
     state.phase = state.selection ? 'ready' : 'idle';
     closePopovers();
@@ -713,6 +767,7 @@
       return;
     }
     state.phase = 'text';
+    state.textEditorSession += 1;
     elements.textEditor.hidden = false;
     elements.textEditor.value = '';
     elements.textEditor.style.color = state.color;
@@ -748,6 +803,7 @@
   function cancelText() {
     if (elements.textEditor.hidden) return false;
     elements.textEditor.hidden = true;
+    state.textEditorSession += 1;
     elements.textEditor.value = '';
     state.textAnchor = null;
     state.phase = 'ready';
@@ -771,6 +827,7 @@
       });
     }
     elements.textEditor.hidden = true;
+    state.textEditorSession += 1;
     elements.textEditor.value = '';
     state.textAnchor = null;
     state.phase = 'ready';
@@ -780,6 +837,11 @@
 
   function beginPointerAction(event) {
     if (!state.image || state.busy || event.button !== 0) return;
+    if (!elements.textEditor.hidden && state.isComposing) {
+      event.preventDefault();
+      return;
+    }
+    if (!elements.textEditor.hidden) commitText();
     if (hasOpenPopover()) state.popoverDismissedAt = Date.now();
     closePopovers();
     const point = pointFromEvent(event);
@@ -787,8 +849,11 @@
     state.dragStart = point;
 
     if (!state.selection) {
-      state.phase = 'selecting';
-      state.selection = { x: point.x, y: point.y, width: 0, height: 0 };
+      state.hoverWindow = windowAtPoint(point);
+      state.phase = state.hoverWindow ? 'pending-window-snap' : 'selecting';
+      state.selection = state.hoverWindow
+        ? null
+        : { x: point.x, y: point.y, width: 0, height: 0 };
       state.annotations = [];
       state.redoStack = [];
     } else if (state.tool === 'select') {
@@ -833,7 +898,16 @@
     state.pointer = point;
     state.pointerOnCanvas = true;
 
-    if (state.phase === 'pending-selection') {
+    if (state.phase === 'pending-window-snap') {
+      if (distance(state.dragStart, point) >= 4) {
+        state.phase = 'selecting';
+        state.hoverWindow = null;
+        state.selection = geometry.clampRect(
+          geometry.rectFromPoints(state.dragStart, point),
+          viewBounds(),
+        );
+      }
+    } else if (state.phase === 'pending-selection') {
       if (distance(state.dragStart, point) >= 4) {
         state.phase = 'selecting';
         state.selection = geometry.clampRect(
@@ -878,6 +952,7 @@
         if (distance(previous, point) >= 1.2) state.draft.points.push({ ...point });
       }
     } else {
+      if (!state.selection) state.hoverWindow = windowAtPoint(point);
       updateCursor(point);
     }
 
@@ -908,7 +983,11 @@
         : state.annotations;
     } else if (priorPhase === 'resizing') {
       state.selection = state.baseSelection ? { ...state.baseSelection } : state.selection;
-    } else if (priorPhase === 'selecting' || priorPhase === 'pending-selection') {
+    } else if (
+      priorPhase === 'selecting' ||
+      priorPhase === 'pending-selection' ||
+      priorPhase === 'pending-window-snap'
+    ) {
       state.selection = state.baseSelection ? { ...state.baseSelection } : null;
       state.annotations = state.baseAnnotations ? copyAnnotations(state.baseAnnotations) : [];
       state.redoStack = state.baseRedoStack ? copyAnnotations(state.baseRedoStack) : [];
@@ -932,7 +1011,16 @@
     if (event.button !== 0) return;
     const priorPhase = state.phase;
 
-    if (priorPhase === 'pending-selection') {
+    if (priorPhase === 'pending-window-snap') {
+      if (state.hoverWindow) {
+        state.selection = snapSelectionToPixels(state.hoverWindow);
+        state.hoverWindow = null;
+        state.phase = 'ready';
+        announceSelection();
+      } else {
+        state.phase = 'idle';
+      }
+    } else if (priorPhase === 'pending-selection') {
       state.phase = 'ready';
     } else if (priorPhase === 'selecting') {
       if (
@@ -1346,6 +1434,7 @@
   async function activateCapture(payload) {
     const blob = new Blob([payload.pngBytes], { type: 'image/png' });
     state.image = await createImageBitmap(blob);
+    state.windowRects = Array.isArray(payload.windows) ? payload.windows : [];
     state.pixelSize = payload.pixelSize || { width: state.image.width, height: state.image.height };
     state.viewSize = { width: window.innerWidth, height: window.innerHeight };
     state.magnifierEnabled = payload.settings?.showMagnifier !== false;
@@ -1417,7 +1506,11 @@
   canvas.addEventListener('pointermove', movePointer);
   canvas.addEventListener('pointerup', finishPointerAction);
   canvas.addEventListener('pointercancel', finishPointerAction);
-  canvas.addEventListener('pointerleave', hideMagnifier);
+  canvas.addEventListener('pointerleave', () => {
+    state.hoverWindow = null;
+    hideMagnifier();
+    if (!state.selection) render();
+  });
   canvas.addEventListener('pointerenter', () => {
     state.pointerOnCanvas = true;
   });
@@ -1448,19 +1541,26 @@
     button.addEventListener('click', () => {
       if (state.busy) return;
       state.color = button.dataset.color;
+      if (state.toolSettings[state.tool]?.color) {
+        state.toolSettings[state.tool].color = state.color;
+      }
       elements.textEditor.style.color = state.color;
       closePopovers(true);
       updateToolbarState();
     });
   });
-  document.querySelectorAll('[data-size]').forEach((button) => {
-    button.addEventListener('click', () => {
-      if (state.busy) return;
-      state.sizeIndex = Number(button.dataset.size);
-      elements.textEditor.style.fontSize = `${selectedFontSize()}px`;
-      closePopovers(true);
-      updateToolbarState();
-    });
+  elements.customColor.addEventListener('input', () => {
+    if (state.busy || !state.toolSettings[state.tool]?.color) return;
+    state.color = elements.customColor.value.toLowerCase();
+    state.toolSettings[state.tool].color = state.color;
+    elements.textEditor.style.color = state.color;
+    updateToolbarState();
+  });
+  elements.sizeRange.addEventListener('input', () => {
+    if (state.busy || !state.toolSettings[state.tool]) return;
+    state.toolSettings[state.tool].size = Number(elements.sizeRange.value);
+    elements.textEditor.style.fontSize = `${selectedFontSize()}px`;
+    updateToolbarState();
   });
   elements.undo.addEventListener('click', undo);
   elements.redo.addEventListener('click', redo);
@@ -1492,8 +1592,15 @@
     resizeTextEditor();
   });
   elements.textEditor.addEventListener('blur', () => {
+    const session = state.textEditorSession;
     window.setTimeout(() => {
-      if (!elements.textEditor.hidden && !state.isComposing) commitText();
+      if (
+        session === state.textEditorSession &&
+        !elements.textEditor.hidden &&
+        !state.isComposing
+      ) {
+        commitText();
+      }
     }, 0);
   });
 

@@ -80,6 +80,18 @@ if (!packageJson.build?.files?.includes('build/icon.ico')) {
   console.error('The Windows tray ICO must be included in the packaged application.');
   process.exit(1);
 }
+if (
+  packageJson.build?.npmRebuild !== false ||
+  packageJson.build?.mac?.extraResources?.[0]?.from !== 'node_modules/get-windows/main' ||
+  packageJson.build?.mac?.extraResources?.[0]?.to !== 'window-snap-macos'
+) {
+  console.error('Window snapping packaging must keep the verified macOS helper resource.');
+  process.exit(1);
+}
+if (Object.hasOwn(packageJson.scripts || {}, 'dist:mac:x64')) {
+  console.error('Intel macOS packaging must remain disabled.');
+  process.exit(1);
+}
 if (packageJson.build?.appId !== 'com.felixkoh.snapcut') {
   console.error('The stable application identifier changed unexpectedly.');
   process.exit(1);

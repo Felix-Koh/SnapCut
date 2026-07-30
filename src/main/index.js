@@ -20,6 +20,10 @@ const {
 
 const { SettingsStore, platformHotkeys, sanitizeSettings } = require('./settings-store');
 const { displayMetricsAffectCaptureMapping } = require('./display-metrics');
+const {
+  enumerateWindowsWithTimeout,
+  preloadWindowEnumerator,
+} = require('./window-snap');
 
 const APP_NAME = 'SnapCut';
 const CAPTURE_SOURCE_ATTEMPTS = 2;
@@ -292,19 +296,31 @@ async function startCapture() {
       throw error;
     }
 
-    if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.hide();
-    await delay(140);
+    const settingsWasVisible = Boolean(
+      settingsWindow && !settingsWindow.isDestroyed() && settingsWindow.isVisible(),
+    );
+    if (settingsWasVisible) {
+      settingsWindow.hide();
+      await delay(50);
+    }
     if (attempt !== captureAttempt || !captureInProgress) {
       return { ok: false, reason: 'cancelled' };
     }
 
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-    const capture = await captureDisplay(display);
-    if (attempt !== captureAttempt || !captureInProgress) {
-      return { ok: false, reason: 'cancelled' };
-    }
     const bounds = display.bounds;
-    capturePixelSize = { ...capture.pixelSize };
+    const capturePromise = captureDisplay(display);
+    const windowRectsPromise = enumerateWindowsWithTimeout(display, {
+      currentPid: process.pid,
+      binaryPath:
+        process.platform === 'darwin' && app.isPackaged
+          ? path.join(process.resourcesPath, 'window-snap-macos')
+          : undefined,
+      convertBounds:
+        process.platform === 'win32'
+          ? (rect) => screen.screenToDipRect(null, rect)
+          : undefined,
+    });
 
     const captureWindow = new BrowserWindow(
       safeWindowOptions({
@@ -382,7 +398,12 @@ async function startCapture() {
       }
     });
 
-    await captureWindow.loadFile(path.join(RENDERER, 'overlay.html'));
+    const loadPromise = captureWindow.loadFile(path.join(RENDERER, 'overlay.html'));
+    const [capture, windowRects] = await Promise.all([
+      capturePromise,
+      windowRectsPromise,
+      loadPromise,
+    ]);
     if (
       attempt !== captureAttempt ||
       !captureInProgress ||
@@ -391,9 +412,11 @@ async function startCapture() {
     ) {
       return { ok: false, reason: 'cancelled' };
     }
+    capturePixelSize = { ...capture.pixelSize };
     overlayAwaitingLoad = true;
     captureWindow.webContents.send('capture:ready', {
       ...capture,
+      windows: windowRects,
       display: {
         id: display.id,
         bounds,
@@ -736,10 +759,10 @@ async function initialize() {
 
   settingsStore = new SettingsStore(app.getPath('userData'));
   const initial = settingsStore.load();
-  setLaunchAtLogin(initial.launchAtLogin);
   registerInitialHotkey(initial.hotkey);
   installIpcHandlers();
   createTray();
+  setImmediate(() => preloadWindowEnumerator());
 
   const cancelActiveCaptureForDisplayChange = () => {
     if (!captureInProgress && !overlayWindow) return;
