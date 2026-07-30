@@ -22,6 +22,7 @@ const {
 const { SettingsStore, platformHotkeys, sanitizeSettings } = require('./settings-store');
 const { displayMetricsAffectCaptureMapping } = require('./display-metrics');
 const { UpdateService, createElectronFetch } = require('./update-service');
+const { prepareMacUpdate } = require('./mac-update');
 const {
   enumerateWindowsWithTimeout,
   preloadWindowEnumerator,
@@ -250,7 +251,7 @@ async function checkForUpdates({ silent = false } = {}) {
   return { ...updateState };
 }
 
-async function downloadAndOpenUpdate() {
+async function downloadAndInstallUpdate() {
   if (!updateService) throw new Error('更新服务尚未准备好');
   let lastPercent = -1;
   setUpdateState({ phase: 'downloading', progress: 0, message: '正在下载新版本…' });
@@ -265,16 +266,31 @@ async function downloadAndOpenUpdate() {
         message: `正在下载新版本… ${percent}%`,
       });
     });
-    const openError = await shell.openPath(result.filePath);
-    if (openError) throw new Error(`安装包无法打开：${openError}`);
-    setUpdateState({
-      phase: 'ready',
-      progress: 100,
-      message: isMac()
-        ? '已打开安装包，请将 SnapCut 拖入“应用程序”完成升级'
-        : '已启动新版安装程序',
-    });
-    if (process.platform === 'win32') {
+    if (isMac()) {
+      if (!app.isPackaged) throw new Error('自动升级仅支持已安装的正式版本');
+      setUpdateState({
+        phase: 'installing',
+        progress: 100,
+        message: '下载完成，正在自动安装并重新启动…',
+      });
+      await prepareMacUpdate({
+        dmgPath: result.filePath,
+        version: result.version,
+        executablePath: app.getPath('exe'),
+        tempDirectory: app.getPath('temp'),
+      });
+      setTimeout(() => {
+        isQuitting = true;
+        app.quit();
+      }, 700);
+    } else {
+      const openError = await shell.openPath(result.filePath);
+      if (openError) throw new Error(`安装包无法打开：${openError}`);
+      setUpdateState({
+        phase: 'ready',
+        progress: 100,
+        message: '已启动新版安装程序',
+      });
       setTimeout(() => {
         isQuitting = true;
         app.quit();
@@ -790,7 +806,7 @@ function installIpcHandlers() {
   });
   ipcMain.handle('update:download-install', (event) => {
     assertSettingsSender(event);
-    return downloadAndOpenUpdate();
+    return downloadAndInstallUpdate();
   });
   ipcMain.handle('capture:start', async (event) => {
     assertSettingsSender(event);
@@ -884,6 +900,24 @@ async function initialize() {
   registerInitialHotkey(initial.hotkey);
   installIpcHandlers();
   createTray();
+  const updateCompleted = process.argv.includes('--snapcut-update-complete');
+  const updateFailed = process.argv.includes('--snapcut-update-failed');
+  if (updateCompleted) {
+    setUpdateState({
+      phase: 'up-to-date',
+      currentVersion: app.getVersion(),
+      latestVersion: app.getVersion(),
+      progress: 100,
+      message: `已自动升级到 ${app.getVersion()}`,
+    });
+  } else if (updateFailed) {
+    setUpdateState({
+      phase: 'error',
+      currentVersion: app.getVersion(),
+      progress: 0,
+      message: '自动升级失败，已恢复原版本。请重试或手动下载安装。',
+    });
+  }
   setImmediate(() => preloadWindowEnumerator());
   if (app.isPackaged) {
     const automaticUpdateTimer = setTimeout(() => {
@@ -914,7 +948,9 @@ async function initialize() {
   });
 
   const launchedHidden = process.argv.includes('--autostart') || process.argv.includes('--hidden');
-  if (initial.firstRun && !launchedHidden) {
+  if (updateCompleted || updateFailed) {
+    createSettingsWindow({ show: true });
+  } else if (initial.firstRun && !launchedHidden) {
     createSettingsWindow({ show: true });
     settingsStore.update({ firstRun: false });
   }

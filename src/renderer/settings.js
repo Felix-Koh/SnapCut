@@ -63,7 +63,7 @@
       progress: 0,
       message: '尚未检查更新',
     };
-    const busy = state.phase === 'checking' || state.phase === 'downloading';
+    const busy = ['checking', 'downloading', 'installing'].includes(state.phase);
     const available = state.phase === 'available';
     const progress = Math.max(0, Math.min(100, Number(state.progress) || 0));
     elements.updateStatus.textContent = state.message || '尚未检查更新';
@@ -74,18 +74,23 @@
         ? '检查中…'
         : state.phase === 'downloading'
           ? `${progress}%`
+          : state.phase === 'installing'
+            ? '正在安装…'
           : state.phase === 'ready'
-            ? '安装包已打开'
+            ? '安装程序已启动'
             : state.phase === 'up-to-date'
               ? '再次检查'
               : '检查更新';
-    elements.updateProgress.hidden = state.phase !== 'downloading';
-    elements.updateProgress.setAttribute('aria-hidden', String(state.phase !== 'downloading'));
+    const showProgress = state.phase === 'downloading' || state.phase === 'installing';
+    elements.updateProgress.hidden = !showProgress;
+    elements.updateProgress.setAttribute('aria-hidden', String(!showProgress));
     elements.updateProgressBar.style.width = `${progress}%`;
     if (state.phase === 'available') {
-      elements.updateDetail.textContent = `当前 ${state.currentVersion}，最新 ${state.latestVersion}。下载后会先校验安装包。`;
-    } else if (state.phase === 'ready' && platform === 'darwin') {
-      elements.updateDetail.textContent = '请在已打开的 DMG 中将 SnapCut 拖入“应用程序”。';
+      elements.updateDetail.textContent = platform === 'darwin'
+        ? `当前 ${state.currentVersion}，最新 ${state.latestVersion}。校验后会自动安装并重新启动。`
+        : `当前 ${state.currentVersion}，最新 ${state.latestVersion}。下载后会先校验安装包。`;
+    } else if (state.phase === 'installing') {
+      elements.updateDetail.textContent = 'SnapCut 将自动退出、替换旧版本并重新启动，请稍候。';
     } else if (state.phase === 'unsupported') {
       elements.updateDetail.textContent = 'SnapCut 仅提供 Windows x64 和 Apple Silicon Mac 安装包。';
     } else {
@@ -259,16 +264,16 @@
   } else {
     render({
       appName: 'SnapCut',
-      version: '1.2.4 preview',
+      version: '1.2.5 preview',
       platform: navigator.platform.includes('Mac') ? 'darwin' : 'win32',
       screenPermission: 'granted',
       lastCaptureError: null,
       update: {
         phase: 'available',
         currentVersion: '1.2.0',
-        latestVersion: '1.2.4',
+        latestVersion: '1.2.5',
         progress: 0,
-        message: '发现新版本 1.2.4',
+        message: '发现新版本 1.2.5',
       },
       settings: {
         hotkey: navigator.platform.includes('Mac') ? 'Control+Command+A' : 'Alt+A',

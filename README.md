@@ -32,8 +32,8 @@ SnapCut 把常用截图能力集中在一个轻量、独立、常驻后台的桌
 
 | 系统 | 文件 | 适用设备 |
 |---|---|---|
-| Windows 10 / 11 | `SnapCut-1.2.4-windows-x64.exe` | 64 位 Intel / AMD 电脑 |
-| macOS Apple Silicon | `SnapCut-1.2.4-macos-arm64.dmg` | macOS 12 或更高版本，M1、M2、M3、M4、M5 等 Mac |
+| Windows 10 / 11 | `SnapCut-1.2.5-windows-x64.exe` | 64 位 Intel / AMD 电脑 |
+| macOS Apple Silicon | `SnapCut-1.2.5-macos-arm64.dmg` | macOS 12 或更高版本，M1、M2、M3、M4、M5 等 Mac |
 
 ### 首版未签名提示
 
@@ -81,13 +81,13 @@ SnapCut 把常用截图能力集中在一个轻量、独立、常驻后台的桌
 在 SnapCut 设置页点击“检查更新”。发现新版本后点击“下载并升级”，SnapCut 会从本仓库的正式 Release 下载当前系统对应的安装包，并使用 `SHA256SUMS.txt` 自动校验：
 
 - Windows：校验成功后自动启动新版安装程序并退出当前版本。
-- Apple Silicon Mac：校验成功后自动打开 DMG；请将 SnapCut 拖入“应用程序”完成替换。由于当前版本未签名，macOS 的安全确认仍需手动完成。
+- Apple Silicon Mac：从 `1.2.5` 开始，校验成功后会自动退出旧版本、静默挂载 DMG、替换应用并启动新版本，不需要再打开 DMG 或手动拖动。安装助手会先保留旧版本备份；如果新版未能稳定启动，会自动恢复并重新打开旧版。
 
 应用启动后也会延迟检查一次更新，不会阻塞启动，不会上传截图或使用数据。
 
 从 `1.2.3` 开始，更新下载使用系统网络通道，会自动沿用 Windows / macOS 的系统代理与证书设置。如果仍提示无法连接或无法验证安全证书，请暂时切换代理或 VPN 节点，或检查系统时间和代理证书后重试；SnapCut 不会关闭 HTTPS 证书校验。
 
-如果 `1.2.2` 点击“下载并升级”显示 `TypeError: fetch failed`，请从 GitHub Releases 手动安装当前最新版本一次。旧版更新器无法通过软件更新替换自身；安装 `1.2.3` 或更高版本后，后续一键升级会自动使用新的系统网络通道。
+如果使用 `1.2.4` 或更早版本，第一次升级到 `1.2.5` 仍需手动安装一次，因为旧版本内部还没有自动替换助手。安装 `1.2.5` 后，之后的软件更新才会完成下载、校验、替换和重启的全自动流程。
 
 ## 截图中的快捷键
 
@@ -143,7 +143,7 @@ npm run dist:win         # Windows x64
 
 ## 发布
 
-推送与 `package.json` 版本一致的标签（例如 `v1.2.4`）后，GitHub Actions 会：
+推送与 `package.json` 版本一致的标签（例如 `v1.2.5`）后，GitHub Actions 会：
 
 1. 在 Windows 与 Apple Silicon macOS 的原生 Runner 上分别检查、构建并做启动烟雾测试；
 2. 核验 1 个 EXE、1 个 DMG、1 个 ZIP；
