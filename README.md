@@ -17,10 +17,12 @@ SnapCut 把常用截图能力集中在一个轻量、独立、常驻后台的桌
 - 选区移动、八方向缩放、物理像素尺寸提示
 - 像素放大镜、坐标与颜色取样
 - 矩形、椭圆、箭头、画笔、马赛克、文字
+- 完成后的标注可重新选中、移动、缩放、改色和改粗细；文字可双击修改内容
 - 每种标注工具独立记住颜色和粗细，支持自定义颜色与连续滑杆调节
 - 颜色与粗细弹层自动对齐，粗细调整时提供实时预览
 - 撤销、重做
 - 一键复制到剪贴板，或保存为无损 PNG
+- 后台预热截图界面，减少按快捷键后等待时间
 - 系统托盘 / 菜单栏常驻，可随时隐藏图标或选择开机启动
 - 软件内检查更新、下载进度与一键升级，安装包下载后自动核验 SHA-256
 - Retina 与 Windows 高 DPI 缩放适配
@@ -32,8 +34,8 @@ SnapCut 把常用截图能力集中在一个轻量、独立、常驻后台的桌
 
 | 系统 | 文件 | 适用设备 |
 |---|---|---|
-| Windows 10 / 11 | `SnapCut-1.2.7-windows-x64.exe` | 64 位 Intel / AMD 电脑 |
-| macOS Apple Silicon | `SnapCut-1.2.7-macos-arm64.dmg` | macOS 12 或更高版本，M1、M2、M3、M4、M5 等 Mac |
+| Windows 10 / 11 | `SnapCut-1.2.8-windows-x64.exe` | 64 位 Intel / AMD 电脑 |
+| macOS Apple Silicon | `SnapCut-1.2.8-macos-arm64.dmg` | macOS 12 或更高版本，M1、M2、M3、M4、M5 等 Mac |
 
 ### 首版未签名提示
 
@@ -113,6 +115,8 @@ macOS 不允许应用自行指定菜单栏图标的左右位置。按住 `Comman
 
 文字输入时，`Enter` 换行，点击画面空白处或按 `Ctrl / Command + Enter` 会保留文字，`Esc` 放弃本次文字。
 
+完成标注后按 `V` 切回选择工具，再单击标注即可重新编辑：拖动标注可移动，拖动橙色控制点可缩放，颜色和粗细按钮会修改当前标注；方向键可以微调位置，`Delete / Backspace` 删除。双击文字可重新修改文字内容。
+
 > 马赛克用于视觉弱化。真正的机密信息，建议在发送前使用不透明色块完全遮挡并再次确认。
 
 ## 当前边界
@@ -149,7 +153,7 @@ npm run dist:win         # Windows x64
 
 ## 发布
 
-推送与 `package.json` 版本一致的标签（例如 `v1.2.7`）后，GitHub Actions 会：
+推送与 `package.json` 版本一致的标签（例如 `v1.2.8`）后，GitHub Actions 会：
 
 1. 在 Windows 与 Apple Silicon macOS 的原生 Runner 上分别检查、构建并做启动烟雾测试；
 2. 核验 1 个 EXE、1 个 DMG、1 个 ZIP；

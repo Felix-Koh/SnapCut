@@ -40,6 +40,8 @@ const RENDERER = path.join(ROOT, 'src', 'renderer');
 let settingsStore;
 let settingsWindow = null;
 let overlayWindow = null;
+let preparedOverlayWindow = null;
+let preparedOverlayPromise = null;
 let tray = null;
 let captureInProgress = false;
 let registeredHotkey = null;
@@ -157,6 +159,84 @@ function lockWindowToLocalPage(window, htmlFile) {
   window.webContents.on('will-navigate', (event, url) => {
     if (url !== expectedUrl) event.preventDefault();
   });
+}
+
+function createCaptureWindow(bounds) {
+  const captureWindow = new BrowserWindow(
+    safeWindowOptions({
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+      frame: false,
+      transparent: false,
+      backgroundColor: '#000000',
+      show: false,
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      hasShadow: false,
+      acceptFirstMouse: true,
+      hiddenInMissionControl: true,
+      roundedCorners: false,
+      autoHideMenuBar: true,
+      title: `${APP_NAME} Capture`,
+    }),
+  );
+  lockWindowToLocalPage(captureWindow, 'overlay.html');
+  return captureWindow;
+}
+
+function prepareOverlayWindow() {
+  if (isQuitting || preparedOverlayPromise || preparedOverlayWindow) {
+    return preparedOverlayPromise;
+  }
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const window = createCaptureWindow(display.bounds);
+  preparedOverlayWindow = window;
+  window.once('closed', () => {
+    if (preparedOverlayWindow === window) {
+      preparedOverlayWindow = null;
+      preparedOverlayPromise = null;
+    }
+  });
+  preparedOverlayPromise = window
+    .loadFile(path.join(RENDERER, 'overlay.html'))
+    .then(() => window)
+    .catch((error) => {
+      if (!window.isDestroyed()) window.destroy();
+      if (preparedOverlayWindow === window) {
+        preparedOverlayWindow = null;
+        preparedOverlayPromise = null;
+      }
+      throw error;
+    });
+  preparedOverlayPromise.catch(() => {});
+  return preparedOverlayPromise;
+}
+
+async function acquireOverlayWindow(bounds) {
+  let captureWindow = null;
+  if (preparedOverlayPromise) {
+    try {
+      captureWindow = await preparedOverlayPromise;
+    } catch {
+      captureWindow = null;
+    }
+  }
+  if (captureWindow === preparedOverlayWindow) {
+    preparedOverlayWindow = null;
+    preparedOverlayPromise = null;
+  }
+  if (!captureWindow || captureWindow.isDestroyed()) {
+    captureWindow = createCaptureWindow(bounds);
+    await captureWindow.loadFile(path.join(RENDERER, 'overlay.html'));
+  }
+  captureWindow.setBounds(bounds, false);
+  return captureWindow;
 }
 
 function createSettingsWindow({ show = true } = {}) {
@@ -438,30 +518,7 @@ async function startCapture() {
           : undefined,
     });
 
-    const captureWindow = new BrowserWindow(
-      safeWindowOptions({
-        x: bounds.x,
-        y: bounds.y,
-        width: bounds.width,
-        height: bounds.height,
-        frame: false,
-        transparent: false,
-        backgroundColor: '#000000',
-        show: false,
-        resizable: false,
-        movable: false,
-        minimizable: false,
-        maximizable: false,
-        fullscreenable: false,
-        skipTaskbar: true,
-        hasShadow: false,
-        acceptFirstMouse: true,
-        hiddenInMissionControl: true,
-        roundedCorners: false,
-        autoHideMenuBar: true,
-        title: `${APP_NAME} Capture`,
-      }),
-    );
+    const captureWindow = await acquireOverlayWindow(bounds);
     overlayWindow = captureWindow;
 
     if (isMac()) {
@@ -472,7 +529,6 @@ async function startCapture() {
       });
     }
     captureWindow.setAlwaysOnTop(true, 'screen-saver');
-    lockWindowToLocalPage(captureWindow, 'overlay.html');
     captureWindow.on('close', () => {
       if (overlayWindow !== captureWindow) return;
       if (!overlayClosing) {
@@ -492,6 +548,7 @@ async function startCapture() {
       overlayClosing = false;
       overlayAwaitingLoad = false;
       if (settingsWindow?.isVisible()) focusAccessoryApp();
+      setImmediate(() => prepareOverlayWindow());
     });
     captureWindow.webContents.on('render-process-gone', (_event, details) => {
       if (
@@ -514,11 +571,9 @@ async function startCapture() {
       }
     });
 
-    const loadPromise = captureWindow.loadFile(path.join(RENDERER, 'overlay.html'));
     const [capture, windowRects] = await Promise.all([
       capturePromise,
       windowRectsPromise,
-      loadPromise,
     ]);
     if (
       attempt !== captureAttempt ||
@@ -931,7 +986,10 @@ async function initialize() {
       message: '自动升级失败，已恢复原版本。请重试或手动下载安装。',
     });
   }
-  setImmediate(() => preloadWindowEnumerator());
+  setImmediate(() => {
+    preloadWindowEnumerator();
+    prepareOverlayWindow();
+  });
   if (app.isPackaged) {
     const automaticUpdateTimer = setTimeout(() => {
       checkForUpdates({ silent: true }).catch(() => {});
@@ -990,6 +1048,11 @@ if (singleInstance) {
   app.on('before-quit', () => {
     isQuitting = true;
     closeOverlay({ destroy: true });
+    if (preparedOverlayWindow && !preparedOverlayWindow.isDestroyed()) {
+      preparedOverlayWindow.destroy();
+    }
+    preparedOverlayWindow = null;
+    preparedOverlayPromise = null;
     unregisterHotkey();
   });
 }

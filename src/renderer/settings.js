@@ -275,16 +275,16 @@
   } else {
     render({
       appName: 'SnapCut',
-      version: '1.2.7 preview',
+      version: '1.2.8 preview',
       platform: navigator.platform.includes('Mac') ? 'darwin' : 'win32',
       screenPermission: 'granted',
       lastCaptureError: null,
       update: {
         phase: 'available',
         currentVersion: '1.2.0',
-        latestVersion: '1.2.7',
+        latestVersion: '1.2.8',
         progress: 0,
-        message: '发现新版本 1.2.7',
+        message: '发现新版本 1.2.8',
       },
       settings: {
         hotkey: navigator.platform.includes('Mac') ? 'Control+Command+A' : 'Alt+A',

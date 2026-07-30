@@ -43,3 +43,15 @@ test('popover clamping uses the actual CSS viewport', () => {
   assert.match(script, /const viewportWidth = document\.documentElement\.clientWidth/);
   assert.match(script, /const viewportHeight = document\.documentElement\.clientHeight/);
 });
+
+test('completed annotations can be selected, restyled, moved, resized, and text can reopen', () => {
+  assert.match(html, /src="\.\.\/shared\/annotations\.js/);
+  assert.match(html, /data-tool="select"[^>]*aria-label="选择和编辑标注/);
+  assert.match(script, /function selectedAnnotation\(/);
+  assert.match(script, /annotationGeometry\.hitTest\(state\.annotations, point\)/);
+  assert.match(script, /state\.phase = 'moving-annotation'/);
+  assert.match(script, /state\.phase = 'resizing-annotation'/);
+  assert.match(script, /updateSelectedAnnotationStyle\(\{ color: state\.color \}\)/);
+  assert.match(script, /startTextEditor\(\{ x: annotation\.x, y: annotation\.y \}, annotationIndex\)/);
+  assert.match(script, /event\.key === 'Delete' \|\| event\.key === 'Backspace'/);
+});

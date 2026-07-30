@@ -8,7 +8,7 @@
     />
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
     <title>SnapCut 截图</title>
-    <link rel="stylesheet" href="overlay.css?v=1.2.7" />
+    <link rel="stylesheet" href="overlay.css?v=1.2.8" />
   </head>
   <body>
     <canvas
@@ -42,7 +42,7 @@
     </aside>
 
     <div class="toolbar" id="toolbar" role="toolbar" aria-label="截图标注工具" hidden>
-      <button class="tool-button is-active" type="button" data-tool="select" aria-label="选择和移动，快捷键 V" aria-pressed="true" title="选择和移动 (V)">
+      <button class="tool-button is-active" type="button" data-tool="select" aria-label="选择和编辑标注，快捷键 V" aria-pressed="true" title="选择和编辑标注 (V)">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 3 12 9-6 1.5-3 5.5L6 3Z" /></svg>
       </button>
       <button class="tool-button" type="button" data-tool="rect" aria-label="矩形工具，快捷键 R" aria-pressed="false" title="矩形 (R)">
@@ -166,7 +166,8 @@
     <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
     <div class="sr-status" id="sr-status" role="status" aria-live="polite"></div>
 
-    <script src="../shared/geometry.js?v=1.2.7"></script>
-    <script src="overlay.js?v=1.2.7"></script>
+    <script src="../shared/geometry.js?v=1.2.8"></script>
+    <script src="../shared/annotations.js?v=1.2.8"></script>
+    <script src="overlay.js?v=1.2.8"></script>
   </body>
 </html>

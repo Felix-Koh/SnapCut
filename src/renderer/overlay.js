@@ -2,6 +2,7 @@
   'use strict';
 
   const geometry = window.SnapGeometry;
+  const annotationGeometry = window.SnapAnnotations;
   const canvas = document.querySelector('#capture-canvas');
   const context = canvas.getContext('2d', { alpha: false });
   const magnifierCanvas = document.querySelector('#magnifier-canvas');
@@ -72,11 +73,14 @@
       text: { color: COLORS[0], size: 22 },
     },
     annotations: [],
+    selectedAnnotationIndex: null,
     redoStack: [],
     draft: null,
     dragStart: null,
     baseSelection: null,
     baseAnnotations: null,
+    baseAnnotation: null,
+    baseAnnotationBounds: null,
     baseRedoStack: null,
     activeHandle: null,
     pointer: { x: 0, y: 0 },
@@ -84,6 +88,7 @@
     pointerInUi: false,
     magnifierEnabled: true,
     textAnchor: null,
+    editingTextIndex: null,
     textEditorMaxHeight: 180,
     textEditorSession: 0,
     isComposing: false,
@@ -104,6 +109,70 @@
         ? { points: annotation.points.map((point) => ({ x: point.x, y: point.y })) }
         : {}),
     }));
+  }
+
+  function selectedAnnotation() {
+    const index = state.selectedAnnotationIndex;
+    return Number.isInteger(index) && index >= 0 && index < state.annotations.length
+      ? state.annotations[index]
+      : null;
+  }
+
+  function activeStyleType() {
+    return state.tool === 'select' && selectedAnnotation()
+      ? selectedAnnotation().type
+      : state.tool;
+  }
+
+  function annotationSize(annotation) {
+    if (!annotation) return null;
+    if (annotation.type === 'text') return annotation.fontSize;
+    if (annotation.type === 'mosaic') return annotation.brushSize;
+    return annotation.width;
+  }
+
+  function syncSettingsFromSelectedAnnotation() {
+    const annotation = selectedAnnotation();
+    if (!annotation) return;
+    const settings = state.toolSettings[annotation.type];
+    if (!settings) return;
+    if (annotation.color) {
+      settings.color = annotation.color;
+      state.color = annotation.color;
+    }
+    const size = annotationSize(annotation);
+    if (Number.isFinite(size)) settings.size = size;
+  }
+
+  function selectAnnotation(index, { announceSelection = true } = {}) {
+    state.selectedAnnotationIndex = index >= 0 ? index : null;
+    syncSettingsFromSelectedAnnotation();
+    if (announceSelection && selectedAnnotation()) {
+      const labels = {
+        rect: '矩形',
+        ellipse: '椭圆',
+        arrow: '箭头',
+        pen: '画笔',
+        mosaic: '马赛克',
+        text: '文字',
+      };
+      const suffix = selectedAnnotation().type === 'text' ? '，双击可修改文字' : '';
+      announce(`已选中${labels[selectedAnnotation().type] || '标注'}${suffix}`);
+    }
+  }
+
+  function updateSelectedAnnotationStyle({ color, size } = {}) {
+    const annotation = selectedAnnotation();
+    if (!annotation) return false;
+    if (color && annotation.type !== 'mosaic') annotation.color = color;
+    if (Number.isFinite(size)) {
+      if (annotation.type === 'text') annotation.fontSize = size;
+      else if (annotation.type === 'mosaic') annotation.brushSize = size;
+      else annotation.width = size;
+    }
+    state.redoStack = [];
+    render();
+    return true;
   }
 
   function pointFromEvent(event) {
@@ -169,9 +238,11 @@
 
   function applyColor(color) {
     const normalized = normalizeHexColor(color);
-    if (!normalized || state.busy || !state.toolSettings[state.tool]?.color) return false;
+    const styleType = activeStyleType();
+    if (!normalized || state.busy || !state.toolSettings[styleType]?.color) return false;
     state.color = normalized.toLowerCase();
-    state.toolSettings[state.tool].color = state.color;
+    state.toolSettings[styleType].color = state.color;
+    updateSelectedAnnotationStyle({ color: state.color });
     elements.textEditor.style.color = state.color;
     elements.customColorPreview.style.backgroundColor = state.color;
     elements.customColorHex.value = normalized;
@@ -296,6 +367,7 @@
   function selectFullScreen() {
     state.selection = snapSelectionToPixels(viewBounds());
     state.annotations = [];
+    state.selectedAnnotationIndex = null;
     state.redoStack = [];
     state.phase = 'ready';
   }
@@ -476,7 +548,13 @@
       target.shadowBlur = 2;
       target.shadowOffsetY = 1;
       const lineHeight = annotation.fontSize * 1.35;
-      wrapTextLines(target, annotation.text, annotation.maxWidth).forEach((line, index) => {
+      const lines = wrapTextLines(target, annotation.text, annotation.maxWidth);
+      annotation.renderWidth = Math.max(
+        1,
+        ...lines.map((line) => Math.min(annotation.maxWidth, target.measureText(line || ' ').width)),
+      );
+      annotation.renderHeight = Math.max(lineHeight, lines.length * lineHeight);
+      lines.forEach((line, index) => {
         target.fillText(line, annotation.x, annotation.y + index * lineHeight);
       });
     }
@@ -484,8 +562,32 @@
   }
 
   function drawAnnotations(target, includeDraft = true) {
-    state.annotations.forEach((annotation) => drawAnnotation(target, annotation));
+    state.annotations.forEach((annotation, index) => {
+      if (index !== state.editingTextIndex) drawAnnotation(target, annotation);
+    });
     if (includeDraft && state.draft) drawAnnotation(target, state.draft);
+  }
+
+  function drawAnnotationSelectionFrame(target) {
+    const annotation = state.tool === 'select' ? selectedAnnotation() : null;
+    const rect = annotationGeometry.bounds(annotation);
+    if (!rect || state.editingTextIndex !== null) return;
+    target.save();
+    target.strokeStyle = '#f97316';
+    target.lineWidth = 1.5;
+    target.setLineDash([5, 4]);
+    target.strokeRect(rect.x - 3.5, rect.y - 3.5, rect.width + 7, rect.height + 7);
+    target.setLineDash([]);
+    const handles = geometry.getHandlePoints(rect);
+    Object.values(handles).forEach((handle) => {
+      target.fillStyle = '#ffffff';
+      target.beginPath();
+      target.arc(handle.x, handle.y, 4.5, 0, Math.PI * 2);
+      target.fill();
+      target.strokeStyle = '#f97316';
+      target.stroke();
+    });
+    target.restore();
   }
 
   function drawSelectionFrame(target) {
@@ -550,6 +652,7 @@
       context.rect(state.selection.x, state.selection.y, state.selection.width, state.selection.height);
       context.clip();
       drawAnnotations(context, true);
+      drawAnnotationSelectionFrame(context);
       context.restore();
 
       context.save();
@@ -707,7 +810,9 @@
     });
     elements.undo.disabled = state.busy || state.annotations.length === 0;
     elements.redo.disabled = state.busy || state.redoStack.length === 0;
-    const settings = state.toolSettings[state.tool];
+    syncSettingsFromSelectedAnnotation();
+    const styleType = activeStyleType();
+    const settings = state.toolSettings[styleType];
     const supportsColor = Boolean(settings?.color);
     const supportsSize = Boolean(settings);
     if (supportsColor) state.color = settings.color;
@@ -726,9 +831,9 @@
       button.disabled = state.busy;
     });
     elements.customColorButton.classList.toggle('is-selected', !COLORS.includes(state.color));
-    const sizeConfig = state.tool === 'text'
+    const sizeConfig = styleType === 'text'
       ? { min: 12, max: 72, step: 1, label: '文字大小' }
-      : state.tool === 'mosaic'
+      : styleType === 'mosaic'
         ? { min: 6, max: 64, step: 1, label: '马赛克笔刷' }
         : { min: 1, max: 20, step: 0.5, label: '线条粗细' };
     elements.sizeRange.min = String(sizeConfig.min);
@@ -738,13 +843,13 @@
     elements.sizeRange.disabled = state.busy || !supportsSize;
     elements.sizeLabel.textContent = sizeConfig.label;
     elements.sizeValue.textContent = `${settings?.size ?? 4} px`;
-    elements.sizePreview.classList.toggle('is-text', state.tool === 'text');
-    elements.sizePreview.classList.toggle('is-mosaic', state.tool === 'mosaic');
-    if (state.tool === 'text') {
+    elements.sizePreview.classList.toggle('is-text', styleType === 'text');
+    elements.sizePreview.classList.toggle('is-mosaic', styleType === 'mosaic');
+    if (styleType === 'text') {
       elements.sizePreviewMark.textContent = 'Aa';
       elements.sizePreviewMark.style.fontSize = `${Math.min(settings?.size ?? 22, 30)}px`;
       elements.sizePreviewMark.style.height = 'auto';
-    } else if (state.tool === 'mosaic') {
+    } else if (styleType === 'mosaic') {
       elements.sizePreviewMark.textContent = '';
       elements.sizePreviewMark.style.fontSize = '';
       elements.sizePreviewMark.style.height = 'auto';
@@ -762,9 +867,9 @@
     }
     elements.sizeButton.setAttribute(
       'aria-label',
-      state.tool === 'text'
+      styleType === 'text'
         ? '选择文字大小'
-        : state.tool === 'mosaic'
+        : styleType === 'mosaic'
           ? '选择马赛克笔刷大小'
           : '选择线条粗细',
     );
@@ -775,6 +880,7 @@
     if (!['select', 'rect', 'ellipse', 'arrow', 'pen', 'mosaic', 'text'].includes(tool)) return;
     if (!elements.textEditor.hidden) commitText();
     state.tool = tool;
+    if (tool !== 'select') state.selectedAnnotationIndex = null;
     if (state.toolSettings[tool]?.color) state.color = state.toolSettings[tool].color;
     state.draft = null;
     state.phase = state.selection ? 'ready' : 'idle';
@@ -836,7 +942,6 @@
       canvas.style.cursor = 'crosshair';
       return;
     }
-    const handle = geometry.hitTestHandle(state.selection, point, HANDLE_RADIUS);
     const cursors = {
       n: 'ns-resize',
       s: 'ns-resize',
@@ -847,7 +952,17 @@
       nw: 'nwse-resize',
       se: 'nwse-resize',
     };
-    if (handle) {
+    const annotation = selectedAnnotation();
+    const annotationBounds = annotationGeometry.bounds(annotation);
+    const annotationHandle = annotationBounds
+      ? geometry.hitTestHandle(annotationBounds, point, HANDLE_RADIUS)
+      : null;
+    const handle = geometry.hitTestHandle(state.selection, point, HANDLE_RADIUS);
+    if (annotationHandle) {
+      canvas.style.cursor = cursors[annotationHandle];
+    } else if (annotationGeometry.hitTest(state.annotations, point) >= 0) {
+      canvas.style.cursor = 'move';
+    } else if (handle) {
       canvas.style.cursor = cursors[handle];
     } else if (geometry.containsPoint(state.selection, point)) {
       canvas.style.cursor = 'move';
@@ -888,6 +1003,7 @@
 
   function pushAnnotation(annotation) {
     state.annotations.push(annotation);
+    state.selectedAnnotationIndex = null;
     state.redoStack = [];
     updateToolbarState();
   }
@@ -896,6 +1012,9 @@
     if (state.busy || !state.annotations.length) return;
     if (!elements.textEditor.hidden) commitText();
     state.redoStack.push(state.annotations.pop());
+    if (state.selectedAnnotationIndex >= state.annotations.length) {
+      state.selectedAnnotationIndex = null;
+    }
     updateToolbarState();
     render();
     announce('已撤销');
@@ -917,7 +1036,7 @@
     )}px`;
   }
 
-  function startTextEditor(point) {
+  function startTextEditor(point, annotationIndex = null) {
     if (
       state.busy ||
       !state.selection ||
@@ -927,21 +1046,32 @@
     }
     state.phase = 'text';
     state.textEditorSession += 1;
+    state.editingTextIndex = Number.isInteger(annotationIndex) ? annotationIndex : null;
+    const existing = state.editingTextIndex === null
+      ? null
+      : state.annotations[state.editingTextIndex];
+    if (existing) {
+      state.toolSettings.text.color = existing.color;
+      state.toolSettings.text.size = existing.fontSize;
+      state.color = existing.color;
+    }
     elements.textEditor.hidden = false;
-    elements.textEditor.value = '';
+    elements.textEditor.value = existing?.text || '';
     elements.textEditor.style.color = state.color;
     elements.textEditor.style.fontSize = `${selectedFontSize()}px`;
     const selectionRight = state.selection.x + state.selection.width;
     const selectionBottom = state.selection.y + state.selection.height;
-    const availableWidth = selectionRight - point.x;
-    const width = Math.min(
-      state.selection.width,
-      Math.max(72, Math.min(260, availableWidth)),
-    );
+    const editorOrigin = existing
+      ? { x: existing.x - 9, y: existing.y - 7 }
+      : point;
+    const availableWidth = selectionRight - editorOrigin.x;
+    const width = existing
+      ? Math.min(state.selection.width, Math.max(72, existing.maxWidth + 16))
+      : Math.min(state.selection.width, Math.max(72, Math.min(260, availableWidth)));
     const minimumHeight = Math.min(42, state.selection.height);
-    const left = geometry.clamp(point.x, state.selection.x, selectionRight - width);
+    const left = geometry.clamp(editorOrigin.x, state.selection.x, selectionRight - width);
     const top = geometry.clamp(
-      point.y,
+      editorOrigin.y,
       state.selection.y,
       selectionBottom - minimumHeight,
     );
@@ -956,7 +1086,10 @@
       x: left + elements.textEditor.clientLeft + 8,
       y: top + elements.textEditor.clientTop + 6,
     };
-    window.setTimeout(() => elements.textEditor.focus(), 0);
+    window.setTimeout(() => {
+      elements.textEditor.focus();
+      if (existing) elements.textEditor.select();
+    }, 0);
   }
 
   function cancelText() {
@@ -965,6 +1098,7 @@
     state.textEditorSession += 1;
     elements.textEditor.value = '';
     state.textAnchor = null;
+    state.editingTextIndex = null;
     state.phase = 'ready';
     canvas.focus();
     return true;
@@ -975,7 +1109,7 @@
     const text = elements.textEditor.value.replace(/\s+$/u, '');
     if (text.trim() && state.textAnchor) {
       const maxWidth = Math.max(1, elements.textEditor.clientWidth - 16);
-      pushAnnotation({
+      const nextText = {
         type: 'text',
         x: state.textAnchor.x,
         y: state.textAnchor.y,
@@ -983,12 +1117,23 @@
         color: state.color,
         fontSize: selectedFontSize(),
         maxWidth,
-      });
+      };
+      if (state.editingTextIndex === null) {
+        pushAnnotation(nextText);
+      } else {
+        state.annotations[state.editingTextIndex] = nextText;
+        state.selectedAnnotationIndex = state.editingTextIndex;
+        state.redoStack = [];
+      }
+    } else if (state.editingTextIndex !== null) {
+      state.annotations.splice(state.editingTextIndex, 1);
+      state.selectedAnnotationIndex = null;
     }
     elements.textEditor.hidden = true;
     state.textEditorSession += 1;
     elements.textEditor.value = '';
     state.textAnchor = null;
+    state.editingTextIndex = null;
     state.phase = 'ready';
     render();
     return true;
@@ -1014,18 +1159,38 @@
         ? null
         : { x: point.x, y: point.y, width: 0, height: 0 };
       state.annotations = [];
+      state.selectedAnnotationIndex = null;
       state.redoStack = [];
     } else if (state.tool === 'select') {
+      const annotation = selectedAnnotation();
+      const annotationBounds = annotationGeometry.bounds(annotation);
+      const annotationHandle = annotationBounds
+        ? geometry.hitTestHandle(annotationBounds, point, HANDLE_RADIUS)
+        : null;
+      const annotationIndex = annotationGeometry.hitTest(state.annotations, point);
       const handle = geometry.hitTestHandle(state.selection, point, HANDLE_RADIUS);
-      if (handle) {
+      if (annotationHandle && annotation) {
+        state.phase = 'resizing-annotation';
+        state.activeHandle = annotationHandle;
+        state.baseAnnotation = copyAnnotations([annotation])[0];
+        state.baseAnnotationBounds = { ...annotationBounds };
+      } else if (annotationIndex >= 0) {
+        selectAnnotation(annotationIndex);
+        state.phase = 'moving-annotation';
+        state.baseAnnotation = copyAnnotations([state.annotations[annotationIndex]])[0];
+        state.baseAnnotationBounds = annotationGeometry.bounds(state.baseAnnotation);
+      } else if (handle) {
+        selectAnnotation(-1, { announceSelection: false });
         state.phase = 'resizing';
         state.activeHandle = handle;
         state.baseSelection = { ...state.selection };
       } else if (geometry.containsPoint(state.selection, point)) {
+        selectAnnotation(-1, { announceSelection: false });
         state.phase = 'moving';
         state.baseSelection = { ...state.selection };
         state.baseAnnotations = copyAnnotations(state.annotations);
       } else {
+        selectAnnotation(-1, { announceSelection: false });
         state.phase = 'pending-selection';
         state.baseSelection = { ...state.selection };
         state.baseAnnotations = copyAnnotations(state.annotations);
@@ -1093,6 +1258,29 @@
       state.annotations = state.baseAnnotations.map((annotation) =>
         translateAnnotation(annotation, actualX, actualY),
       );
+    } else if (state.phase === 'moving-annotation' && state.baseAnnotation) {
+      state.annotations[state.selectedAnnotationIndex] = annotationGeometry.moveWithin(
+        state.baseAnnotation,
+        { x: point.x - state.dragStart.x, y: point.y - state.dragStart.y },
+        state.selection,
+      );
+    } else if (
+      state.phase === 'resizing-annotation' &&
+      state.baseAnnotation &&
+      state.baseAnnotationBounds
+    ) {
+      const resizedBounds = geometry.resizeRect(
+        state.baseAnnotationBounds,
+        state.activeHandle,
+        point,
+        state.selection,
+        6,
+      );
+      state.annotations[state.selectedAnnotationIndex] = annotationGeometry.resize(
+        state.baseAnnotation,
+        state.baseAnnotationBounds,
+        resizedBounds,
+      );
     } else if (state.phase === 'resizing') {
       state.selection = geometry.resizeRect(
         state.baseSelection,
@@ -1128,6 +1316,8 @@
     state.baseSelection = null;
     state.baseAnnotations = null;
     state.baseRedoStack = null;
+    state.baseAnnotation = null;
+    state.baseAnnotationBounds = null;
     state.activeHandle = null;
   }
 
@@ -1142,6 +1332,12 @@
         : state.annotations;
     } else if (priorPhase === 'resizing') {
       state.selection = state.baseSelection ? { ...state.baseSelection } : state.selection;
+    } else if (
+      (priorPhase === 'moving-annotation' || priorPhase === 'resizing-annotation') &&
+      state.baseAnnotation &&
+      state.selectedAnnotationIndex !== null
+    ) {
+      state.annotations[state.selectedAnnotationIndex] = state.baseAnnotation;
     } else if (
       priorPhase === 'selecting' ||
       priorPhase === 'pending-selection' ||
@@ -1224,6 +1420,11 @@
       if (!rectsEqual(state.baseSelection, state.selection)) state.redoStack = [];
       state.phase = 'ready';
       announceSelection();
+    } else if (priorPhase === 'moving-annotation' || priorPhase === 'resizing-annotation') {
+      state.redoStack = [];
+      state.phase = 'ready';
+      syncSettingsFromSelectedAnnotation();
+      selectAnnotation(state.selectedAnnotationIndex);
     }
 
     clearPointerActionState();
@@ -1474,7 +1675,25 @@
       render();
       return;
     }
+    if (selectedAnnotation()) {
+      selectAnnotation(-1, { announceSelection: false });
+      updateToolbarState();
+      render();
+      announce('已取消选择标注');
+      return;
+    }
     window.snapcut?.closeOverlay();
+  }
+
+  function deleteSelectedAnnotation() {
+    if (state.busy || !selectedAnnotation()) return false;
+    state.annotations.splice(state.selectedAnnotationIndex, 1);
+    state.redoStack = [];
+    state.selectedAnnotationIndex = null;
+    updateToolbarState();
+    render();
+    announce('已删除标注');
+    return true;
   }
 
   function moveSelectionByKeyboard(event) {
@@ -1493,6 +1712,19 @@
       x: (direction.x * physicalStep) / scale.x,
       y: (direction.y * physicalStep) / scale.y,
     };
+    const annotation = selectedAnnotation();
+    if (annotation) {
+      state.annotations[state.selectedAnnotationIndex] = annotationGeometry.moveWithin(
+        annotation,
+        delta,
+        state.selection,
+      );
+      state.redoStack = [];
+      updateToolbarState();
+      render();
+      announce('已移动标注');
+      return true;
+    }
     const original = { ...state.selection };
     const moved = snapSelectionToPixels(geometry.moveRect(original, delta, viewBounds()));
     const actualX = moved.x - original.x;
@@ -1520,6 +1752,10 @@
     if (event.key === 'Escape') {
       event.preventDefault();
       cancelCurrentOrClose();
+      return;
+    }
+    if ((event.key === 'Delete' || event.key === 'Backspace') && deleteSelectedAnnotation()) {
+      event.preventDefault();
       return;
     }
     if (modifier && key === 'z') {
@@ -1581,6 +1817,16 @@
       return;
     }
     const point = pointFromEvent(event);
+    const annotationIndex = annotationGeometry.hitTest(state.annotations, point);
+    const annotation = annotationIndex >= 0 ? state.annotations[annotationIndex] : null;
+    if (annotation?.type === 'text') {
+      selectAnnotation(annotationIndex);
+      updateToolbarState();
+      startTextEditor({ x: annotation.x, y: annotation.y }, annotationIndex);
+      render();
+      event.preventDefault();
+      return;
+    }
     if (state.selection && geometry.containsPoint(state.selection, point)) {
       copyAndFinish();
       return;
@@ -1597,6 +1843,12 @@
     state.pixelSize = payload.pixelSize || { width: state.image.width, height: state.image.height };
     state.viewSize = { width: window.innerWidth, height: window.innerHeight };
     state.magnifierEnabled = payload.settings?.showMagnifier !== false;
+    state.selection = null;
+    state.annotations = [];
+    state.selectedAnnotationIndex = null;
+    state.redoStack = [];
+    state.draft = null;
+    state.phase = 'idle';
     canvas.width = state.image.width;
     canvas.height = state.image.height;
     buildPixelatedImage();
@@ -1700,16 +1952,18 @@
     button.addEventListener('click', () => {
       if (state.busy) return;
       state.color = button.dataset.color;
-      if (state.toolSettings[state.tool]?.color) {
-        state.toolSettings[state.tool].color = state.color;
+      const styleType = activeStyleType();
+      if (state.toolSettings[styleType]?.color) {
+        state.toolSettings[styleType].color = state.color;
       }
+      updateSelectedAnnotationStyle({ color: state.color });
       elements.textEditor.style.color = state.color;
       closePopovers(true);
       updateToolbarState();
     });
   });
   elements.customColorButton.addEventListener('click', () => {
-    if (state.busy || !state.toolSettings[state.tool]?.color) return;
+    if (state.busy || !state.toolSettings[activeStyleType()]?.color) return;
     const opening = elements.customColorPanel.hidden;
     elements.customColorPanel.hidden = !opening;
     elements.customColorButton.setAttribute('aria-expanded', String(opening));
@@ -1754,8 +2008,11 @@
   });
   elements.customColorHex.addEventListener('blur', () => syncCustomColorControls());
   elements.sizeRange.addEventListener('input', () => {
-    if (state.busy || !state.toolSettings[state.tool]) return;
-    state.toolSettings[state.tool].size = Number(elements.sizeRange.value);
+    const styleType = activeStyleType();
+    if (state.busy || !state.toolSettings[styleType]) return;
+    const size = Number(elements.sizeRange.value);
+    state.toolSettings[styleType].size = size;
+    updateSelectedAnnotationStyle({ size });
     elements.textEditor.style.fontSize = `${selectedFontSize()}px`;
     updateToolbarState();
   });
