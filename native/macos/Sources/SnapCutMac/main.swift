@@ -5,7 +5,7 @@ import Foundation
 import UniformTypeIdentifiers
 
 private let appName = "SnapCut"
-private let nativeVersion = "0.2.0"
+private let nativeVersion = "0.2.1"
 private let showStatusItemKey = "SnapCutShowStatusItem"
 
 private enum CaptureResult {
@@ -713,7 +713,8 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
     private var currentMouse: CGPoint?
     private var toolbar: NSVisualEffectView?
     private var toolButtons: [CaptureTool: NSButton] = [:]
-    private var colorWell: NSColorWell?
+    private var colorButton: ColorSwatchButton?
+    private var colorPicker: ColorPickerPopoverView?
     private var widthSlider: NSSlider?
     private var widthPreview: LineWidthPreviewView?
     private var textEditor: NSTextField?
@@ -791,6 +792,10 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
         let point = clamp(convert(event.locationInWindow, from: nil), to: bounds)
         currentMouse = point
         styleChangeHistoryCaptured = false
+
+        if let colorPicker, !colorPicker.frame.contains(point) {
+            hideColorPicker()
+        }
 
         if textEditor != nil {
             commitTextEditor()
@@ -1443,9 +1448,6 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
         bar.wantsLayer = true
         bar.layer?.cornerRadius = 10
         bar.layer?.masksToBounds = true
-        NSColorPanel.shared.level = .screenSaver
-        NSColorPanel.shared.showsAlpha = true
-        NSColorPanel.shared.isContinuous = true
 
         var x: CGFloat = 9
         for tool in CaptureTool.allCases {
@@ -1464,12 +1466,12 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
         bar.addSubview(separatorA)
         x += 10
 
-        let well = NSColorWell(frame: CGRect(x: x, y: 10, width: 44, height: 28))
-        well.target = self
-        well.action = #selector(colorChanged(_:))
-        well.toolTip = "颜色"
-        bar.addSubview(well)
-        colorWell = well
+        let swatch = ColorSwatchButton(frame: CGRect(x: x, y: 9, width: 44, height: 30))
+        swatch.target = self
+        swatch.action = #selector(toggleColorPicker(_:))
+        swatch.toolTip = "颜色"
+        bar.addSubview(swatch)
+        colorButton = swatch
         x += 54
 
         let slider = NSSlider(value: 4, minValue: 1, maxValue: 18, target: self, action: #selector(widthChanged(_:)))
@@ -1544,10 +1546,11 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     private func removeToolbar() {
+        hideColorPicker()
         toolbar?.removeFromSuperview()
         toolbar = nil
         toolButtons.removeAll()
-        colorWell = nil
+        colorButton = nil
         widthSlider = nil
         widthPreview = nil
     }
@@ -1592,15 +1595,64 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
         needsDisplay = true
     }
 
-    @objc private func colorChanged(_ sender: NSColorWell) {
-        pushHistoryIfEditingStyle()
-        if let selectedAnnotation {
-            selectedAnnotation.color = sender.color
-            styles[selectedAnnotation.kind]?.color = sender.color
-        } else if selectedTool != .select {
-            styles[selectedTool]?.color = sender.color
+    @objc private func toggleColorPicker(_ sender: NSButton) {
+        guard let sender = sender as? ColorSwatchButton else { return }
+        if colorPicker != nil {
+            hideColorPicker()
+        } else {
+            showColorPicker(anchor: sender)
         }
-        widthPreview?.color = sender.color
+        window?.makeFirstResponder(self)
+    }
+
+    private func showColorPicker(anchor: ColorSwatchButton) {
+        hideColorPicker()
+        styleChangeHistoryCaptured = false
+        let picker = ColorPickerPopoverView(color: currentStyle().color)
+        picker.onColorChanged = { [weak self] color in
+            self?.applyColor(color)
+        }
+        picker.frame.origin = colorPickerOrigin(for: picker.frame.size, anchor: anchor)
+        addSubview(picker, positioned: .above, relativeTo: toolbar)
+        colorPicker = picker
+    }
+
+    private func hideColorPicker() {
+        colorPicker?.removeFromSuperview()
+        colorPicker = nil
+    }
+
+    private func colorPickerOrigin(for pickerSize: CGSize, anchor: NSView) -> CGPoint {
+        guard let toolbar else {
+            return CGPoint(x: 12, y: 12)
+        }
+        let anchorRect = toolbar.convert(anchor.frame, to: self)
+        let margin: CGFloat = 12
+        let x = min(max(margin, anchorRect.midX - pickerSize.width / 2), max(margin, bounds.width - pickerSize.width - margin))
+        var y = toolbar.frame.minY - pickerSize.height - 10
+        if y < margin {
+            y = toolbar.frame.maxY + 10
+        }
+        if y + pickerSize.height > bounds.height - margin {
+            y = bounds.height - pickerSize.height - margin
+        }
+        return CGPoint(x: x, y: max(margin, y))
+    }
+
+    private func applyColor(_ color: NSColor) {
+        pushHistoryIfEditingStyle()
+        let normalizedColor = color.usingColorSpace(.deviceRGB) ?? color
+        if let selectedAnnotation {
+            selectedAnnotation.color = normalizedColor
+            styles[selectedAnnotation.kind]?.color = normalizedColor
+            if selectedAnnotation === editingTextItem {
+                textEditor?.textColor = normalizedColor
+            }
+        } else if selectedTool != .select {
+            styles[selectedTool]?.color = normalizedColor
+        }
+        colorButton?.color = normalizedColor
+        widthPreview?.color = normalizedColor
         needsDisplay = true
     }
 
@@ -1633,16 +1685,21 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
             button.state = tool == selectedTool ? .on : .off
         }
 
-        let targetTool = selectedAnnotation?.kind ?? selectedTool
-        let style = selectedAnnotation.map {
-            DrawingStyle(color: $0.color, lineWidth: $0.kind == .text ? max(1, min(18, ($0.fontSize - 10) / 3.2)) : $0.lineWidth)
-        } ?? styles[targetTool] ?? DrawingStyle(color: .systemRed, lineWidth: 3)
+        let style = currentStyle()
 
-        colorWell?.color = style.color
+        colorButton?.color = style.color
+        colorPicker?.setColor(style.color, notify: false)
         widthSlider?.doubleValue = Double(style.lineWidth)
         widthPreview?.color = style.color
         widthPreview?.lineWidth = style.lineWidth
         widthPreview?.needsDisplay = true
+    }
+
+    private func currentStyle() -> DrawingStyle {
+        let targetTool = selectedAnnotation?.kind ?? selectedTool
+        return selectedAnnotation.map {
+            DrawingStyle(color: $0.color, lineWidth: $0.kind == .text ? max(1, min(18, ($0.fontSize - 10) / 3.2)) : $0.lineWidth)
+        } ?? styles[targetTool] ?? DrawingStyle(color: .systemRed, lineWidth: 3)
     }
 
     @objc private func undoButton() { undo() }
@@ -1869,9 +1926,311 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
     }
 }
 
+private class ColorSwatchButton: NSButton {
+    var color: NSColor = .systemRed {
+        didSet {
+            needsDisplay = true
+        }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        isBordered = false
+        focusRingType = .none
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        isBordered = false
+        focusRingType = .none
+        wantsLayer = true
+    }
+
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let outer = bounds.insetBy(dx: 1, dy: 1)
+        let path = NSBezierPath(roundedRect: outer, xRadius: 7, yRadius: 7)
+        NSColor.black.withAlphaComponent(0.26).setFill()
+        path.fill()
+
+        let colorRect = CGRect(x: outer.minX + 4, y: outer.minY + 4, width: outer.width - 8, height: outer.height - 12)
+        color.setFill()
+        NSBezierPath(roundedRect: colorRect, xRadius: 4, yRadius: 4).fill()
+
+        let spectrumRect = CGRect(x: outer.minX + 4, y: colorRect.maxY + 2, width: outer.width - 8, height: 4)
+        drawHueGradient(in: spectrumRect)
+
+        (state == .on ? NSColor.systemOrange : NSColor.white.withAlphaComponent(0.62)).setStroke()
+        path.lineWidth = state == .on ? 2 : 1
+        path.stroke()
+    }
+}
+
+private final class PresetColorButton: ColorSwatchButton {
+    var presetColor: NSColor = .white
+
+    override func draw(_ dirtyRect: NSRect) {
+        let rect = bounds.insetBy(dx: 2, dy: 2)
+        presetColor.setFill()
+        NSBezierPath(ovalIn: rect).fill()
+        NSColor.black.withAlphaComponent(0.32).setStroke()
+        let border = NSBezierPath(ovalIn: rect)
+        border.lineWidth = 1
+        border.stroke()
+    }
+}
+
+private final class ColorPickerPopoverView: NSView {
+    var onColorChanged: ((NSColor) -> Void)?
+
+    private let field = SaturationBrightnessView(frame: CGRect(x: 12, y: 12, width: 200, height: 128))
+    private let hueSlider = HueSliderView(frame: CGRect(x: 12, y: 150, width: 200, height: 18))
+    private let preview = ColorPreviewView(frame: CGRect(x: 12, y: 180, width: 44, height: 18))
+    private let hexLabel = NSTextField(labelWithString: "")
+    private let presetColors: [NSColor] = [
+        .systemRed,
+        .systemYellow,
+        .systemGreen,
+        .systemBlue,
+        .white,
+        .black,
+    ]
+
+    init(color: NSColor) {
+        super.init(frame: CGRect(x: 0, y: 0, width: 224, height: 210))
+        wantsLayer = true
+        layer?.cornerRadius = 10
+        layer?.masksToBounds = true
+        layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.96).cgColor
+        buildSubviews()
+        setColor(color, notify: false)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.black.withAlphaComponent(0.28).setStroke()
+        let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 10, yRadius: 10)
+        border.lineWidth = 1
+        border.stroke()
+    }
+
+    func setColor(_ color: NSColor, notify: Bool) {
+        let normalized = color.usingColorSpace(.deviceRGB) ?? color
+        var hue: CGFloat = 0
+        var saturation: CGFloat = 0
+        var brightness: CGFloat = 0
+        var alpha: CGFloat = 1
+        normalized.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
+        field.hue = hue
+        field.saturation = saturation
+        field.brightness = brightness
+        hueSlider.hue = hue
+        preview.color = normalized
+        hexLabel.stringValue = normalized.hexString
+        if notify {
+            onColorChanged?(normalized)
+        }
+    }
+
+    private func buildSubviews() {
+        field.onColorChanged = { [weak self] color in
+            self?.setColor(color, notify: true)
+        }
+        addSubview(field)
+
+        hueSlider.onHueChanged = { [weak self] hue in
+            guard let self else { return }
+            field.hue = hue
+            let color = NSColor(
+                calibratedHue: hue,
+                saturation: field.saturation,
+                brightness: field.brightness,
+                alpha: 1
+            )
+            setColor(color, notify: true)
+        }
+        addSubview(hueSlider)
+
+        addSubview(preview)
+
+        hexLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        hexLabel.textColor = .secondaryLabelColor
+        hexLabel.alignment = .left
+        hexLabel.frame = CGRect(x: 64, y: 179, width: 80, height: 20)
+        addSubview(hexLabel)
+
+        var x: CGFloat = 126
+        for color in presetColors {
+            let button = PresetColorButton(frame: CGRect(x: x, y: 178, width: 14, height: 18))
+            button.color = color
+            button.presetColor = color
+            button.target = self
+            button.action = #selector(selectPreset(_:))
+            addSubview(button)
+            x += 15
+        }
+    }
+
+    @objc private func selectPreset(_ sender: NSButton) {
+        guard let sender = sender as? PresetColorButton else { return }
+        setColor(sender.presetColor, notify: true)
+    }
+}
+
+private final class SaturationBrightnessView: NSView {
+    var hue: CGFloat = 0 {
+        didSet {
+            needsDisplay = true
+        }
+    }
+    var saturation: CGFloat = 1 {
+        didSet {
+            needsDisplay = true
+        }
+    }
+    var brightness: CGFloat = 1 {
+        didSet {
+            needsDisplay = true
+        }
+    }
+    var onColorChanged: ((NSColor) -> Void)?
+
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let rowCount = max(1, Int(bounds.height.rounded()))
+        for row in 0..<rowCount {
+            let value = 1 - CGFloat(row) / CGFloat(max(1, rowCount - 1))
+            let left = NSColor(calibratedWhite: value, alpha: 1)
+            let right = NSColor(calibratedHue: hue, saturation: 1, brightness: value, alpha: 1)
+            NSGradient(starting: left, ending: right)?.draw(
+                in: CGRect(x: 0, y: CGFloat(row), width: bounds.width, height: 1),
+                angle: 0
+            )
+        }
+
+        NSColor.black.withAlphaComponent(0.32).setStroke()
+        let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
+        border.lineWidth = 1
+        border.stroke()
+
+        let marker = CGPoint(x: saturation * bounds.width, y: (1 - brightness) * bounds.height)
+        NSColor.white.setStroke()
+        let outer = NSBezierPath(ovalIn: CGRect(x: marker.x - 6, y: marker.y - 6, width: 12, height: 12))
+        outer.lineWidth = 2
+        outer.stroke()
+        NSColor.black.withAlphaComponent(0.75).setStroke()
+        let inner = NSBezierPath(ovalIn: CGRect(x: marker.x - 4, y: marker.y - 4, width: 8, height: 8))
+        inner.lineWidth = 1
+        inner.stroke()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        updateColor(with: event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        updateColor(with: event)
+    }
+
+    private func updateColor(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        saturation = min(max(point.x / max(1, bounds.width), 0), 1)
+        brightness = 1 - min(max(point.y / max(1, bounds.height), 0), 1)
+        onColorChanged?(
+            NSColor(
+                calibratedHue: hue,
+                saturation: saturation,
+                brightness: brightness,
+                alpha: 1
+            )
+        )
+    }
+}
+
+private final class HueSliderView: NSView {
+    var hue: CGFloat = 0 {
+        didSet {
+            needsDisplay = true
+        }
+    }
+    var onHueChanged: ((CGFloat) -> Void)?
+
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        drawHueGradient(in: bounds)
+
+        NSColor.black.withAlphaComponent(0.32).setStroke()
+        let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 5, yRadius: 5)
+        border.lineWidth = 1
+        border.stroke()
+
+        let markerX = hue * bounds.width
+        NSColor.white.setStroke()
+        let marker = NSBezierPath()
+        marker.move(to: CGPoint(x: markerX, y: bounds.minY - 2))
+        marker.line(to: CGPoint(x: markerX, y: bounds.maxY + 2))
+        marker.lineWidth = 3
+        marker.stroke()
+        NSColor.black.withAlphaComponent(0.72).setStroke()
+        marker.lineWidth = 1
+        marker.stroke()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        updateHue(with: event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        updateHue(with: event)
+    }
+
+    private func updateHue(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        hue = min(max(point.x / max(1, bounds.width), 0), 1)
+        onHueChanged?(hue)
+    }
+}
+
+private final class ColorPreviewView: NSView {
+    var color: NSColor = .systemRed {
+        didSet {
+            needsDisplay = true
+        }
+    }
+
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let rect = bounds.insetBy(dx: 0.5, dy: 0.5)
+        color.setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
+        NSColor.black.withAlphaComponent(0.28).setStroke()
+        let border = NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5)
+        border.lineWidth = 1
+        border.stroke()
+    }
+}
+
 private final class LineWidthPreviewView: NSView {
-    var color: NSColor = .systemRed
-    var lineWidth: CGFloat = 4
+    var color: NSColor = .systemRed {
+        didSet {
+            needsDisplay = true
+        }
+    }
+    var lineWidth: CGFloat = 4 {
+        didSet {
+            needsDisplay = true
+        }
+    }
 
     override var isFlipped: Bool { true }
 
@@ -1904,6 +2263,36 @@ private extension AnnotationGeometry {
             && lhs.endPoint.equalTo(rhs.endPoint)
             && lhs.points == rhs.points
             && lhs.fontSize == rhs.fontSize
+    }
+}
+
+private extension NSColor {
+    var hexString: String {
+        let color = usingColorSpace(.sRGB) ?? usingColorSpace(.deviceRGB) ?? self
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 1
+        color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        let r = min(max(Int((red * 255).rounded()), 0), 255)
+        let g = min(max(Int((green * 255).rounded()), 0), 255)
+        let b = min(max(Int((blue * 255).rounded()), 0), 255)
+        return String(format: "#%02X%02X%02X", r, g, b)
+    }
+}
+
+private func drawHueGradient(in rect: CGRect) {
+    let steps = max(1, Int(rect.width.rounded(.up)))
+    let stepWidth = rect.width / CGFloat(steps)
+    for step in 0..<steps {
+        let hue = CGFloat(step) / CGFloat(max(1, steps - 1))
+        NSColor(calibratedHue: hue, saturation: 1, brightness: 1, alpha: 1).setFill()
+        CGRect(
+            x: rect.minX + CGFloat(step) * stepWidth,
+            y: rect.minY,
+            width: stepWidth + 1,
+            height: rect.height
+        ).fill()
     }
 }
 
