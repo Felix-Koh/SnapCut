@@ -151,6 +151,20 @@ npm run dist:win         # Windows x64
 
 应用采用 Electron 43，渲染进程启用 sandbox 与 context isolation，关闭 Node.js integration；截图数据只在内存中处理，主进程仅负责系统截图、剪贴板和保存对话框。
 
+### macOS 原生版预览
+
+仓库中的 \`native/macos\` 是独立的 macOS 原生重写，不影响当前 Electron 版。第一阶段使用 Swift + AppKit，先验证菜单栏常驻、全局快捷键、屏幕选区、复制 PNG 和保存 PNG；后续再迁移标注编辑、窗口吸附、设置页和自动更新。
+
+在 Apple Silicon Mac 上运行：
+
+\`\`\`bash
+cd native/macos
+./build-app.sh
+open build/SnapCut.app
+\`\`\`
+
+原生版暂时是开发预览包，不属于当前 GitHub Release。第一次截图需要在“系统设置 → 隐私与安全性 → 屏幕录制”中允许 SnapCut。
+
 ## 发布
 
 推送与 `package.json` 版本一致的标签（例如 `v1.2.8`）后，GitHub Actions 会：

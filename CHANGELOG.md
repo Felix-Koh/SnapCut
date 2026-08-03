@@ -1,5 +1,12 @@
 # Changelog
 
+## Native macOS preview - 2026-08-03
+
+- 新增独立的 \`native/macos\` 原生工程，使用 Swift + AppKit
+- 完成菜单栏常驻、Control + Command + A 全局快捷键、当前显示器截图和选区框选
+- 支持 Enter / Command + C 复制 PNG、Command + S 保存 PNG、Esc 取消
+- 原生版先作为开发预览，不替换当前 Electron 版本
+
 ## 1.2.6 - 2026-07-30
 
 - macOS 更新从“下载并打开 DMG”改为真正的一键全自动升级
