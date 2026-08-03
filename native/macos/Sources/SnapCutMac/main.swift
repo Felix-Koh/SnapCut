@@ -5,7 +5,7 @@ import Foundation
 import UniformTypeIdentifiers
 
 private let appName = "SnapCut"
-private let nativeVersion = "0.2.2"
+private let nativeVersion = "0.2.3"
 private let showStatusItemKey = "SnapCutShowStatusItem"
 
 private enum CaptureResult {
@@ -793,9 +793,15 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
         let point = clamp(convert(event.locationInWindow, from: nil), to: bounds)
         currentMouse = point
         styleChangeHistoryCaptured = false
+        let clickedFloatingControl = isPointInFloatingControls(point)
 
         if let colorPicker, !colorPicker.frame.contains(point) {
             hideColorPicker()
+        }
+
+        if clickedFloatingControl {
+            needsDisplay = true
+            return
         }
 
         if textEditor != nil {
@@ -884,7 +890,13 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
             selection = snapped(resized(original, by: handle, to: point).standardized, threshold: 8)
             repositionToolbar()
         case .creatingAnnotation(let item, let start):
-            updateCreatedAnnotation(item, from: start, to: clamp(point, to: selection ?? bounds))
+            updateCreatedAnnotation(
+                item,
+                from: start,
+                to: clamp(point, to: selection ?? bounds),
+                constrainAspect: event.modifierFlags.contains(.shift),
+                inside: selection ?? bounds
+            )
         case .drawingBrush(let item):
             let clipped = clamp(point, to: selection ?? bounds)
             if item.points.last.map({ distance($0, clipped) > 1.5 }) ?? true {
@@ -895,7 +907,14 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
             item.move(by: CGPoint(x: point.x - start.x, y: point.y - start.y))
             clampAnnotation(item, inside: selection)
         case .resizingAnnotation(let item, let handle, let original):
-            resizeAnnotation(item, handle: handle, original: original, to: point, inside: selection)
+            resizeAnnotation(
+                item,
+                handle: handle,
+                original: original,
+                to: point,
+                inside: selection,
+                constrainAspect: event.modifierFlags.contains(.shift)
+            )
         }
 
         needsDisplay = true
@@ -1133,15 +1152,12 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
         needsDisplay = true
     }
 
-    private func updateCreatedAnnotation(_ item: AnnotationItem, from start: CGPoint, to point: CGPoint) {
+    private func updateCreatedAnnotation(_ item: AnnotationItem, from start: CGPoint, to point: CGPoint, constrainAspect: Bool, inside limit: CGRect) {
         switch item.kind {
-        case .rectangle, .ellipse, .mosaic, .text:
-            item.rect = CGRect(
-                x: min(start.x, point.x),
-                y: min(start.y, point.y),
-                width: abs(point.x - start.x),
-                height: abs(point.y - start.y)
-            ).standardized
+        case .rectangle, .ellipse, .mosaic:
+            item.rect = annotationRect(from: start, to: point, constrainSquare: constrainAspect, inside: limit)
+        case .text:
+            item.rect = annotationRect(from: start, to: point, constrainSquare: false, inside: limit)
         case .arrow:
             item.startPoint = start
             item.endPoint = point
@@ -1150,6 +1166,32 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
         case .select:
             break
         }
+    }
+
+    private func annotationRect(from start: CGPoint, to point: CGPoint, constrainSquare: Bool, inside limit: CGRect) -> CGRect {
+        guard constrainSquare else {
+            return CGRect(
+                x: min(start.x, point.x),
+                y: min(start.y, point.y),
+                width: abs(point.x - start.x),
+                height: abs(point.y - start.y)
+            ).standardized
+        }
+
+        let dx = point.x - start.x
+        let dy = point.y - start.y
+        let signX: CGFloat = dx < 0 ? -1 : 1
+        let signY: CGFloat = dy < 0 ? -1 : 1
+        let maxWidth = signX > 0 ? limit.maxX - start.x : start.x - limit.minX
+        let maxHeight = signY > 0 ? limit.maxY - start.y : start.y - limit.minY
+        let size = max(0, min(max(abs(dx), abs(dy)), maxWidth, maxHeight))
+        let end = CGPoint(x: start.x + signX * size, y: start.y + signY * size)
+        return CGRect(
+            x: min(start.x, end.x),
+            y: min(start.y, end.y),
+            width: abs(end.x - start.x),
+            height: abs(end.y - start.y)
+        ).standardized
     }
 
     private func drawBackground() {
@@ -1558,6 +1600,16 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
         widthPreview = nil
     }
 
+    private func isPointInFloatingControls(_ point: CGPoint) -> Bool {
+        if let toolbar, toolbar.frame.contains(point) {
+            return true
+        }
+        if let colorPicker, colorPicker.frame.contains(point) {
+            return true
+        }
+        return false
+    }
+
     private func makeSeparator(x: CGFloat) -> NSView {
         let separator = NSView(frame: CGRect(x: x, y: 9, width: 1, height: 30))
         separator.wantsLayer = true
@@ -1811,7 +1863,17 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
         }
     }
 
-    private func resized(_ rect: CGRect, by handle: ResizeHandle, to point: CGPoint) -> CGRect {
+    private func resized(_ rect: CGRect, by handle: ResizeHandle, to point: CGPoint, lockedAspectRatio: CGFloat? = nil) -> CGRect {
+        let standardized: CGRect
+        if let lockedAspectRatio, lockedAspectRatio > 0, lockedAspectRatio.isFinite {
+            standardized = aspectLockedResized(rect, by: handle, to: point, aspectRatio: lockedAspectRatio).standardized
+        } else {
+            standardized = freelyResized(rect, by: handle, to: point).standardized
+        }
+        return standardized.width < 8 || standardized.height < 8 ? rect : standardized
+    }
+
+    private func freelyResized(_ rect: CGRect, by handle: ResizeHandle, to point: CGPoint) -> CGRect {
         var minX = rect.minX
         var minY = rect.minY
         var maxX = rect.maxX
@@ -1838,13 +1900,68 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
         case .left:
             minX = point.x
         }
-        let standardized = CGRect(x: min(minX, maxX), y: min(minY, maxY), width: abs(maxX - minX), height: abs(maxY - minY))
-        return standardized.width < 8 || standardized.height < 8 ? rect : standardized
+        return CGRect(x: min(minX, maxX), y: min(minY, maxY), width: abs(maxX - minX), height: abs(maxY - minY))
     }
 
-    private func resizeAnnotation(_ item: AnnotationItem, handle: ResizeHandle, original: AnnotationGeometry, to point: CGPoint, inside selection: CGRect?) {
-        let oldBounds = item.bounds
-        let newBounds = clamp(resized(oldBounds, by: handle, to: point), inside: selection ?? bounds)
+    private func aspectLockedResized(_ rect: CGRect, by handle: ResizeHandle, to point: CGPoint, aspectRatio: CGFloat) -> CGRect {
+        let box = rect.standardized
+        switch handle {
+        case .topLeft, .topRight, .bottomRight, .bottomLeft:
+            let anchor: CGPoint
+            switch handle {
+            case .topLeft:
+                anchor = CGPoint(x: box.maxX, y: box.maxY)
+            case .topRight:
+                anchor = CGPoint(x: box.minX, y: box.maxY)
+            case .bottomRight:
+                anchor = CGPoint(x: box.minX, y: box.minY)
+            case .bottomLeft:
+                anchor = CGPoint(x: box.maxX, y: box.minY)
+            default:
+                anchor = .zero
+            }
+
+            let dx = point.x - anchor.x
+            let dy = point.y - anchor.y
+            let signX: CGFloat = dx < 0 ? -1 : 1
+            let signY: CGFloat = dy < 0 ? -1 : 1
+            var width = abs(dx)
+            var height = abs(dy)
+            if width / aspectRatio > height {
+                height = width / aspectRatio
+            } else {
+                width = height * aspectRatio
+            }
+            let end = CGPoint(x: anchor.x + signX * width, y: anchor.y + signY * height)
+            return CGRect(x: min(anchor.x, end.x), y: min(anchor.y, end.y), width: abs(end.x - anchor.x), height: abs(end.y - anchor.y))
+        case .right:
+            let width = max(0, point.x - box.minX)
+            let height = width / aspectRatio
+            return CGRect(x: box.minX, y: box.midY - height / 2, width: width, height: height)
+        case .left:
+            let width = max(0, box.maxX - point.x)
+            let height = width / aspectRatio
+            return CGRect(x: box.maxX - width, y: box.midY - height / 2, width: width, height: height)
+        case .top:
+            let height = max(0, box.maxY - point.y)
+            let width = height * aspectRatio
+            return CGRect(x: box.midX - width / 2, y: box.maxY - height, width: width, height: height)
+        case .bottom:
+            let height = max(0, point.y - box.minY)
+            let width = height * aspectRatio
+            return CGRect(x: box.midX - width / 2, y: box.minY, width: width, height: height)
+        }
+    }
+
+    private func resizeAnnotation(_ item: AnnotationItem, handle: ResizeHandle, original: AnnotationGeometry, to point: CGPoint, inside selection: CGRect?, constrainAspect: Bool) {
+        let oldBounds = annotationBounds(for: original, kind: item.kind, lineWidth: item.lineWidth)
+        let lockedRatio: CGFloat?
+        if constrainAspect, [.rectangle, .ellipse, .mosaic].contains(item.kind) {
+            lockedRatio = max(0.1, oldBounds.standardized.width / max(1, oldBounds.standardized.height))
+        } else {
+            lockedRatio = nil
+        }
+        let newBounds = clamp(resized(oldBounds, by: handle, to: point, lockedAspectRatio: lockedRatio), inside: selection ?? bounds)
         let old = oldBounds.standardized
         let sx = old.width == 0 ? 1 : newBounds.width / old.width
         let sy = old.height == 0 ? 1 : newBounds.height / old.height
@@ -1866,6 +1983,29 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
             item.points = original.points.map(transform)
         case .select:
             break
+        }
+    }
+
+    private func annotationBounds(for geometry: AnnotationGeometry, kind: CaptureTool, lineWidth: CGFloat) -> CGRect {
+        switch kind {
+        case .rectangle, .ellipse, .mosaic, .text:
+            return geometry.rect.standardized
+        case .arrow:
+            return CGRect(
+                x: min(geometry.startPoint.x, geometry.endPoint.x),
+                y: min(geometry.startPoint.y, geometry.endPoint.y),
+                width: abs(geometry.startPoint.x - geometry.endPoint.x),
+                height: abs(geometry.startPoint.y - geometry.endPoint.y)
+            ).insetBy(dx: -max(8, lineWidth), dy: -max(8, lineWidth)).standardized
+        case .pen:
+            guard let first = geometry.points.first else { return .zero }
+            var box = CGRect(origin: first, size: .zero)
+            for point in geometry.points {
+                box = box.union(CGRect(origin: point, size: .zero))
+            }
+            return box.insetBy(dx: -max(8, lineWidth), dy: -max(8, lineWidth)).standardized
+        case .select:
+            return .zero
         }
     }
 
