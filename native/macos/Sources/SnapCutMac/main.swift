@@ -5,7 +5,7 @@ import Foundation
 import UniformTypeIdentifiers
 
 private let appName = "SnapCut"
-private let nativeVersion = "0.2.1"
+private let nativeVersion = "0.2.2"
 private let showStatusItemKey = "SnapCutShowStatusItem"
 
 private enum CaptureResult {
@@ -719,6 +719,7 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
     private var widthPreview: LineWidthPreviewView?
     private var textEditor: NSTextField?
     private var editingTextItem: AnnotationItem?
+    private var textEditingReturnTool: CaptureTool?
     private var isCommittingText = false
     private var styleChangeHistoryCaptured = false
     private var isMagnifierEnabled = true
@@ -799,6 +800,8 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
 
         if textEditor != nil {
             commitTextEditor()
+            needsDisplay = true
+            return
         }
 
         if selection == nil {
@@ -819,7 +822,7 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
                 selectedAnnotation = item
                 if event.clickCount >= 2, item.kind == .text {
                     pushHistory()
-                    startEditingText(item)
+                    startEditingText(item, returnToTool: .select)
                     interaction = .idle
                 } else {
                     pushHistory()
@@ -925,8 +928,8 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
                 selectedAnnotation = nil
                 restoreLastHistoryIfNoChange()
             } else {
-                selectedAnnotation = item
-                selectedTool = .select
+                selectedAnnotation = nil
+                selectedTool = item.kind
                 addToolbar()
                 syncControlsToCurrentTarget()
             }
@@ -1119,7 +1122,7 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
 
         if selectedTool == .text {
             item.rect = CGRect(x: point.x, y: point.y, width: 180, height: max(28, item.fontSize + 10))
-            startEditingText(item)
+            startEditingText(item, returnToTool: .text)
             interaction = .idle
         } else if selectedTool == .pen {
             interaction = .drawingBrush(item: item)
@@ -1714,9 +1717,10 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
     }
     @objc private func cancelCapture() { onResult?(.cancel) }
 
-    private func startEditingText(_ item: AnnotationItem) {
+    private func startEditingText(_ item: AnnotationItem, returnToTool: CaptureTool) {
         commitTextEditor()
         editingTextItem = item
+        textEditingReturnTool = returnToTool
         selectedAnnotation = item
         selectedTool = .select
         syncControlsToCurrentTarget()
@@ -1746,12 +1750,16 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
         editor.removeFromSuperview()
         textEditor = nil
         editingTextItem = nil
+        let returnTool = textEditingReturnTool ?? .select
+        textEditingReturnTool = nil
         if value.isEmpty {
             annotations.removeAll { $0 === item }
             selectedAnnotation = nil
         } else {
-            selectedAnnotation = item
+            selectedAnnotation = returnTool == .select ? item : nil
         }
+        selectedTool = returnTool
+        syncControlsToCurrentTarget()
         window?.makeFirstResponder(self)
         isCommittingText = false
         needsDisplay = true
