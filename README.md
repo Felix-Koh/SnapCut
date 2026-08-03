@@ -153,7 +153,7 @@ npm run dist:win         # Windows x64
 
 ### macOS 原生版预览
 
-仓库中的 \`native/macos\` 是独立的 macOS 原生重写，不影响当前 Electron 版。第一阶段使用 Swift + AppKit，先验证菜单栏常驻、全局快捷键、屏幕选区、复制 PNG 和保存 PNG；后续再迁移标注编辑、窗口吸附、设置页和自动更新。
+仓库中的 \`native/macos\` 是独立的 macOS 原生重写，不影响当前 Electron 版。当前预览版使用 Swift + AppKit，已经包含菜单栏常驻、全局快捷键、窗口自动吸附、屏幕选区、矩形/椭圆/箭头/画笔/马赛克/文字标注、标注重新编辑、颜色色盘、粗细无级滑杆、撤销重做、复制 PNG 和保存 PNG。
 
 在 Apple Silicon Mac 上运行：
 
@@ -163,7 +163,7 @@ cd native/macos
 open build/SnapCut.app
 \`\`\`
 
-原生版暂时是开发预览包，不属于当前 GitHub Release。第一次截图需要在“系统设置 → 隐私与安全性 → 屏幕录制”中允许 SnapCut。
+原生版暂时是开发预览包，不属于当前 GitHub Release，也还没有接入正式签名、公证、DMG 安装包和 Sparkle 自动升级。第一次截图需要在“系统设置 → 隐私与安全性 → 屏幕录制”中允许 SnapCut。
 
 ## 发布
 
