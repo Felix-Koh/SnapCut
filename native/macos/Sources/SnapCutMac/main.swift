@@ -7,7 +7,7 @@ import ScreenCaptureKit
 import UniformTypeIdentifiers
 
 private let appName = "SnapCut"
-private let nativeVersion = "0.3.0"
+private let nativeVersion = "0.3.1"
 private let showStatusItemKey = "SnapCutShowStatusItem"
 
 private enum CaptureResult {
@@ -741,6 +741,59 @@ private final class CapturePanel: NSPanel {
 }
 
 @MainActor
+private func styleFloatingToolbar(_ bar: NSVisualEffectView, cornerRadius: CGFloat = 18) {
+    bar.material = .hudWindow
+    bar.blendingMode = .withinWindow
+    bar.state = .active
+    bar.wantsLayer = true
+    bar.layer?.cornerRadius = cornerRadius
+    bar.layer?.masksToBounds = true
+    bar.layer?.borderWidth = 0.5
+    bar.layer?.borderColor = NSColor.white.withAlphaComponent(0.16).cgColor
+
+    let shadow = NSShadow()
+    shadow.shadowColor = NSColor.black.withAlphaComponent(0.34)
+    shadow.shadowOffset = CGSize(width: 0, height: -6)
+    shadow.shadowBlurRadius = 18
+    bar.shadow = shadow
+}
+
+private final class ToolbarGroupBackgroundView: NSView {
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let rect = bounds.insetBy(dx: 0.5, dy: 0.5)
+        let path = NSBezierPath(roundedRect: rect, xRadius: 12, yRadius: 12)
+        NSColor.black.withAlphaComponent(0.18).setFill()
+        path.fill()
+        NSColor.white.withAlphaComponent(0.10).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+    }
+}
+
+private func floatingToolbarOrigin(toolbarSize: CGSize, in bounds: CGRect, avoiding selection: CGRect?) -> CGPoint {
+    let margin: CGFloat = 18
+    let x = min(max(margin, (bounds.width - toolbarSize.width) / 2), max(margin, bounds.width - toolbarSize.width - margin))
+    var y = bounds.height - toolbarSize.height - 28
+
+    if let selection, selection.standardized.intersects(CGRect(x: x - 8, y: y - 8, width: toolbarSize.width + 16, height: toolbarSize.height + 16)) {
+        let aboveSelection = selection.minY - toolbarSize.height - 14
+        let belowSelection = selection.maxY + 14
+        if aboveSelection >= margin {
+            y = aboveSelection
+        } else if belowSelection + toolbarSize.height <= bounds.height - margin {
+            y = belowSelection
+        }
+    }
+
+    return CGPoint(
+        x: x,
+        y: min(max(margin, y), max(margin, bounds.height - toolbarSize.height - margin))
+    )
+}
+
+@MainActor
 private final class RecordingSelectionController: NSObject {
     private let completion: (RegionSelectionResult, RecordingSelectionController) -> Void
     private var panel: NSPanel?
@@ -1009,9 +1062,14 @@ private final class RecordingSelectionView: NSView {
 
     private func drawSelection(_ rect: CGRect, in context: CGContext) {
         context.saveGState()
-        context.setStrokeColor(NSColor.systemRed.cgColor)
+        context.setShadow(offset: .zero, blur: 4, color: NSColor.black.withAlphaComponent(0.55).cgColor)
+        context.setStrokeColor(NSColor.white.withAlphaComponent(0.96).cgColor)
         context.setLineWidth(2)
         context.stroke(rect.insetBy(dx: 1, dy: 1))
+        context.setShadow(offset: .zero, blur: 0, color: nil)
+        context.setStrokeColor(NSColor.systemRed.withAlphaComponent(0.95).cgColor)
+        context.setLineWidth(1)
+        context.stroke(rect.insetBy(dx: 3, dy: 3))
         for (_, handleRect) in handleRects(for: rect) {
             context.setFillColor(NSColor.white.cgColor)
             context.fill(handleRect)
@@ -1066,17 +1124,14 @@ private final class RecordingSelectionView: NSView {
     private func addToolbar() {
         guard let selection else { return }
         if toolbar == nil {
-            let bar = NSVisualEffectView(frame: CGRect(x: 0, y: 0, width: 154, height: 42))
-            bar.material = .hudWindow
-            bar.state = .active
-            bar.wantsLayer = true
-            bar.layer?.cornerRadius = 10
-            bar.layer?.masksToBounds = true
+            let bar = NSVisualEffectView(frame: CGRect(x: 0, y: 0, width: 188, height: 52))
+            styleFloatingToolbar(bar)
+            bar.addSubview(ToolbarGroupBackgroundView(frame: CGRect(x: 8, y: 6, width: 172, height: 40)))
 
-            let start = makeButton("开始录制", action: #selector(startRecording))
-            start.frame = CGRect(x: 10, y: 7, width: 82, height: 28)
-            let cancel = makeButton("取消", action: #selector(cancelRecording))
-            cancel.frame = CGRect(x: 98, y: 7, width: 46, height: 28)
+            let start = makeButton("开始录制", action: #selector(startRecording), prominent: true)
+            start.frame = CGRect(x: 12, y: 10, width: 108, height: 32)
+            let cancel = makeButton("取消", action: #selector(cancelRecording), prominent: false)
+            cancel.frame = CGRect(x: 128, y: 10, width: 48, height: 32)
             bar.addSubview(start)
             bar.addSubview(cancel)
             addSubview(bar)
@@ -1092,12 +1147,7 @@ private final class RecordingSelectionView: NSView {
 
     private func repositionToolbar(for selection: CGRect) {
         guard let toolbar else { return }
-        let margin: CGFloat = 12
-        let barWidth = toolbar.frame.width
-        let barHeight = toolbar.frame.height
-        let x = min(max(margin, selection.minX), max(margin, bounds.width - barWidth - margin))
-        let y = selection.maxY + margin <= bounds.height - barHeight ? selection.maxY + margin : max(margin, selection.minY - barHeight - margin)
-        toolbar.frame.origin = CGPoint(x: x, y: y)
+        toolbar.frame.origin = floatingToolbarOrigin(toolbarSize: toolbar.frame.size, in: bounds, avoiding: selection)
     }
 
     private func removeToolbar() {
@@ -1105,11 +1155,17 @@ private final class RecordingSelectionView: NSView {
         toolbar = nil
     }
 
-    private func makeButton(_ title: String, action: Selector) -> NSButton {
+    private func makeButton(_ title: String, action: Selector, prominent: Bool) -> NSButton {
         let button = NSButton(title: title, target: self, action: action)
-        button.bezelStyle = .texturedRounded
+        button.bezelStyle = .rounded
         button.font = NSFont.systemFont(ofSize: 13, weight: .medium)
         button.focusRingType = .none
+        if prominent {
+            button.bezelColor = .systemRed
+            button.contentTintColor = .white
+        } else {
+            button.contentTintColor = NSColor.white.withAlphaComponent(0.92)
+        }
         return button
     }
 
@@ -2108,9 +2164,14 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
 
     private func drawSelection(_ rect: CGRect, in context: CGContext) {
         context.saveGState()
-        context.setStrokeColor(NSColor.systemOrange.cgColor)
+        context.setShadow(offset: .zero, blur: 4, color: NSColor.black.withAlphaComponent(0.55).cgColor)
+        context.setStrokeColor(NSColor.white.withAlphaComponent(0.96).cgColor)
         context.setLineWidth(2)
         context.stroke(rect.insetBy(dx: 1, dy: 1))
+        context.setShadow(offset: .zero, blur: 0, color: nil)
+        context.setStrokeColor(NSColor.systemOrange.withAlphaComponent(0.95).cgColor)
+        context.setLineWidth(1)
+        context.stroke(rect.insetBy(dx: 3, dy: 3))
         if selectedTool == .select {
             drawHandles(for: rect, in: context)
         }
@@ -2346,23 +2407,20 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     private func buildToolbar() {
-        let bar = NSVisualEffectView(frame: CGRect(x: 0, y: 0, width: 626, height: 48))
-        bar.material = .hudWindow
-        bar.state = .active
-        bar.wantsLayer = true
-        bar.layer?.cornerRadius = 10
-        bar.layer?.masksToBounds = true
+        let bar = NSVisualEffectView(frame: CGRect(x: 0, y: 0, width: 626, height: 54))
+        styleFloatingToolbar(bar)
+        bar.addSubview(ToolbarGroupBackgroundView(frame: CGRect(x: 7, y: 7, width: CGFloat(CaptureTool.allCases.count) * 36 + 6, height: 40)))
 
-        var x: CGFloat = 9
+        var x: CGFloat = 11
         for tool in CaptureTool.allCases {
             let button = makeIconButton(symbolName: tool.symbolName, fallbackTitle: tool.fallbackTitle, action: #selector(selectTool(_:)))
             button.identifier = NSUserInterfaceItemIdentifier(tool.rawValue)
             button.toolTip = tool.tooltip
             button.setButtonType(.toggle)
-            button.frame = CGRect(x: x, y: 9, width: 30, height: 30)
+            button.frame = CGRect(x: x, y: 11, width: 32, height: 32)
             bar.addSubview(button)
             toolButtons[tool] = button
-            x += 34
+            x += 36
         }
 
         x += 6
@@ -2370,7 +2428,9 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
         bar.addSubview(separatorA)
         x += 10
 
-        let swatch = ColorSwatchButton(frame: CGRect(x: x, y: 9, width: 44, height: 30))
+        bar.addSubview(ToolbarGroupBackgroundView(frame: CGRect(x: x - 5, y: 7, width: 221, height: 40)))
+
+        let swatch = ColorSwatchButton(frame: CGRect(x: x, y: 11, width: 44, height: 32))
         swatch.target = self
         swatch.action = #selector(toggleColorPicker(_:))
         swatch.toolTip = "颜色"
@@ -2380,13 +2440,13 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
 
         let slider = NSSlider(value: 4, minValue: 1, maxValue: 18, target: self, action: #selector(widthChanged(_:)))
         slider.isContinuous = true
-        slider.frame = CGRect(x: x, y: 12, width: 96, height: 24)
+        slider.frame = CGRect(x: x, y: 15, width: 96, height: 24)
         slider.toolTip = "粗细或字号"
         bar.addSubview(slider)
         widthSlider = slider
         x += 104
 
-        let preview = LineWidthPreviewView(frame: CGRect(x: x, y: 9, width: 46, height: 30))
+        let preview = LineWidthPreviewView(frame: CGRect(x: x, y: 12, width: 46, height: 30))
         bar.addSubview(preview)
         widthPreview = preview
         x += 54
@@ -2395,37 +2455,41 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
         bar.addSubview(separatorB)
         x += 10
 
+        bar.addSubview(ToolbarGroupBackgroundView(frame: CGRect(x: x - 5, y: 7, width: 76, height: 40)))
+
         let undo = makeIconButton(symbolName: "arrow.uturn.backward", fallbackTitle: "↶", action: #selector(undoButton))
         undo.toolTip = "撤销"
-        undo.frame = CGRect(x: x, y: 9, width: 30, height: 30)
+        undo.frame = CGRect(x: x, y: 11, width: 32, height: 32)
         bar.addSubview(undo)
-        x += 34
+        x += 36
 
         let redo = makeIconButton(symbolName: "arrow.uturn.forward", fallbackTitle: "↷", action: #selector(redoButton))
         redo.toolTip = "重做"
-        redo.frame = CGRect(x: x, y: 9, width: 30, height: 30)
+        redo.frame = CGRect(x: x, y: 11, width: 32, height: 32)
         bar.addSubview(redo)
-        x += 40
+        x += 42
 
         let separatorC = makeSeparator(x: x)
         bar.addSubview(separatorC)
         x += 10
 
+        bar.addSubview(ToolbarGroupBackgroundView(frame: CGRect(x: x - 5, y: 7, width: 128, height: 40)))
+
         let copy = makeIconButton(symbolName: "doc.on.doc", fallbackTitle: "复制", action: #selector(copyCapture))
         copy.toolTip = "复制"
-        copy.frame = CGRect(x: x, y: 9, width: 38, height: 30)
+        copy.frame = CGRect(x: x, y: 11, width: 38, height: 32)
         bar.addSubview(copy)
         x += 42
 
         let save = makeIconButton(symbolName: "square.and.arrow.down", fallbackTitle: "保存", action: #selector(saveCapture))
         save.toolTip = "保存"
-        save.frame = CGRect(x: x, y: 9, width: 38, height: 30)
+        save.frame = CGRect(x: x, y: 11, width: 38, height: 32)
         bar.addSubview(save)
         x += 42
 
         let cancel = makeIconButton(symbolName: "xmark", fallbackTitle: "取消", action: #selector(cancelCapture))
         cancel.toolTip = "取消"
-        cancel.frame = CGRect(x: x, y: 9, width: 38, height: 30)
+        cancel.frame = CGRect(x: x, y: 11, width: 38, height: 32)
         bar.addSubview(cancel)
         x += 47
 
@@ -2441,12 +2505,10 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
 
     private func repositionToolbar(for selection: CGRect) {
         guard let toolbar else { return }
-        let margin: CGFloat = 12
-        let barWidth = toolbar.frame.width
-        let barHeight = toolbar.frame.height
-        let x = min(max(margin, selection.minX), max(margin, bounds.width - barWidth - margin))
-        let y = selection.maxY + margin <= bounds.height - barHeight ? selection.maxY + margin : max(margin, selection.minY - barHeight - margin)
-        toolbar.frame.origin = CGPoint(x: x, y: y)
+        toolbar.frame.origin = floatingToolbarOrigin(toolbarSize: toolbar.frame.size, in: bounds, avoiding: selection)
+        if let colorPicker, let colorButton {
+            colorPicker.frame.origin = colorPickerOrigin(for: colorPicker.frame.size, anchor: colorButton)
+        }
     }
 
     private func removeToolbar() {
@@ -2470,9 +2532,9 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     private func makeSeparator(x: CGFloat) -> NSView {
-        let separator = NSView(frame: CGRect(x: x, y: 9, width: 1, height: 30))
+        let separator = NSView(frame: CGRect(x: x, y: 11, width: 1, height: 32))
         separator.wantsLayer = true
-        separator.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.16).cgColor
+        separator.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.22).cgColor
         return separator
     }
 
@@ -2485,9 +2547,10 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
             button = NSButton(title: fallbackTitle, target: self, action: action)
             button.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         }
-        button.bezelStyle = .texturedRounded
+        button.bezelStyle = .accessoryBarAction
         button.isBordered = true
         button.focusRingType = .none
+        button.contentTintColor = NSColor.white.withAlphaComponent(0.92)
         return button
     }
 
@@ -2596,7 +2659,9 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
 
     private func syncControlsToCurrentTarget() {
         for (tool, button) in toolButtons {
-            button.state = tool == selectedTool ? .on : .off
+            let isActive = tool == selectedTool
+            button.state = isActive ? .on : .off
+            button.contentTintColor = isActive ? .systemOrange : NSColor.white.withAlphaComponent(0.92)
         }
 
         let style = currentStyle()
@@ -3011,6 +3076,13 @@ private final class ColorPickerPopoverView: NSView {
         layer?.cornerRadius = 10
         layer?.masksToBounds = true
         layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.96).cgColor
+        layer?.borderWidth = 0.5
+        layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.30)
+        shadow.shadowOffset = CGSize(width: 0, height: -4)
+        shadow.shadowBlurRadius = 14
+        self.shadow = shadow
         buildSubviews()
         setColor(color, notify: false)
     }
@@ -3243,8 +3315,14 @@ private final class LineWidthPreviewView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
-        context.setFillColor(NSColor.black.withAlphaComponent(0.18).cgColor)
-        context.fill(bounds.insetBy(dx: 0.5, dy: 0.5))
+        let rect = bounds.insetBy(dx: 0.5, dy: 0.5)
+        let path = NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8)
+        NSColor.black.withAlphaComponent(0.16).setFill()
+        path.fill()
+        NSColor.white.withAlphaComponent(0.10).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+
         context.setStrokeColor(color.cgColor)
         context.setLineCap(.round)
         context.setLineWidth(lineWidth)
