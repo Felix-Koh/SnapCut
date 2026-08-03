@@ -1,17 +1,39 @@
 import AppKit
+import AVFoundation
 import Carbon.HIToolbox
 import CoreGraphics
 import Foundation
+import ScreenCaptureKit
 import UniformTypeIdentifiers
 
 private let appName = "SnapCut"
-private let nativeVersion = "0.2.3"
+private let nativeVersion = "0.3.0"
 private let showStatusItemKey = "SnapCutShowStatusItem"
 
 private enum CaptureResult {
     case copy
     case save
     case cancel
+}
+
+private enum RegionSelectionResult {
+    case start
+    case cancel
+}
+
+private struct RecordingRegion {
+    var displayID: CGDirectDisplayID
+    var localRect: CGRect
+    var scale: CGFloat
+
+    var outputPixelSize: CGSize {
+        let width = max(2, Int((localRect.width * scale).rounded(.toNearestOrAwayFromZero)))
+        let height = max(2, Int((localRect.height * scale).rounded(.toNearestOrAwayFromZero)))
+        return CGSize(
+            width: CGFloat(width.isMultiple(of: 2) ? width : width + 1),
+            height: CGFloat(height.isMultiple(of: 2) ? height : height + 1)
+        )
+    }
 }
 
 private enum CaptureTool: String, CaseIterable {
@@ -95,6 +117,13 @@ private enum CaptureInteraction {
     case resizingAnnotation(item: AnnotationItem, handle: ResizeHandle, original: AnnotationGeometry)
 }
 
+private enum RegionSelectionInteraction {
+    case idle
+    case drawing(start: CGPoint)
+    case moving(start: CGPoint, original: CGRect)
+    case resizing(handle: ResizeHandle, original: CGRect)
+}
+
 @main
 @MainActor
 private struct SnapCutMacApp {
@@ -110,24 +139,39 @@ private struct SnapCutMacApp {
 @MainActor
 private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
+    private var statusMenu: NSMenu?
+    private var captureMenuItem: NSMenuItem?
+    private var recordingMenuItem: NSMenuItem?
     private var captureController: CaptureController?
-    private var hotKeyRef: EventHotKeyRef?
+    private var recordingSelectionController: RecordingSelectionController?
+    private var screenRecorder: ScreenRecordingSession?
+    private var statusItemWasTemporarilyShownForRecording = false
+    private var captureHotKeyRef: EventHotKeyRef?
+    private var recordingHotKeyRef: EventHotKeyRef?
     private var hotKeyHandler: EventHandlerRef?
     private var preferencesController: PreferencesController?
-    private let updateChecker = NativeUpdateChecker()
+    private lazy var updateChecker = NativeUpdateChecker()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if UserDefaults.standard.object(forKey: showStatusItemKey) == nil {
             UserDefaults.standard.set(true, forKey: showStatusItemKey)
         }
-        setStatusItemVisible(UserDefaults.standard.bool(forKey: showStatusItemKey))
         installGlobalHotKey()
+        if UserDefaults.standard.bool(forKey: showStatusItemKey) {
+            DispatchQueue.main.async { [weak self] in
+                self?.installStatusItem()
+            }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        if let hotKeyRef {
-            UnregisterEventHotKey(hotKeyRef)
-            self.hotKeyRef = nil
+        if let captureHotKeyRef {
+            UnregisterEventHotKey(captureHotKeyRef)
+            self.captureHotKeyRef = nil
+        }
+        if let recordingHotKeyRef {
+            UnregisterEventHotKey(recordingHotKeyRef)
+            self.recordingHotKeyRef = nil
         }
         if let hotKeyHandler {
             RemoveEventHandler(hotKeyHandler)
@@ -144,6 +188,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func setStatusItemVisible(_ visible: Bool) {
         UserDefaults.standard.set(visible, forKey: showStatusItemKey)
+        if !visible, screenRecorder != nil {
+            ensureStatusItemForActiveRecording()
+            statusItemWasTemporarilyShownForRecording = true
+            return
+        }
         if visible {
             if statusItem == nil {
                 installStatusItem()
@@ -151,6 +200,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         } else if let statusItem {
             NSStatusBar.system.removeStatusItem(statusItem)
             self.statusItem = nil
+            statusMenu = nil
+            captureMenuItem = nil
+            recordingMenuItem = nil
         }
     }
 
@@ -163,6 +215,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         let capture = NSMenuItem(title: "开始截图", action: #selector(beginCapture), keyEquivalent: "")
         capture.target = self
         menu.addItem(capture)
+        captureMenuItem = capture
+
+        let recording = NSMenuItem(title: "开始录制", action: #selector(toggleRecording), keyEquivalent: "")
+        recording.target = self
+        menu.addItem(recording)
+        recordingMenuItem = recording
 
         let preferences = NSMenuItem(title: "偏好设置", action: #selector(showPreferences), keyEquivalent: ",")
         preferences.target = self
@@ -176,11 +234,16 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         let shortcut = NSMenuItem(title: "快捷键  Control + Command + A", action: nil, keyEquivalent: "")
         shortcut.isEnabled = false
         menu.addItem(shortcut)
+        let recordShortcut = NSMenuItem(title: "录制快捷键  Control + Command + R", action: nil, keyEquivalent: "")
+        recordShortcut.isEnabled = false
+        menu.addItem(recordShortcut)
         let quit = NSMenuItem(title: "退出 SnapCut", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
         item.menu = menu
+        statusMenu = menu
         statusItem = item
+        updateRecordingMenu()
     }
 
     private func installGlobalHotKey() {
@@ -203,6 +266,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             if hotKeyID.id == 1 {
                 Task { @MainActor in delegate.beginCapture() }
+            } else if hotKeyID.id == 2 {
+                Task { @MainActor in delegate.toggleRecording() }
             }
             return noErr
         }
@@ -217,18 +282,32 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             &hotKeyHandler
         )
 
-        let hotKeyID = EventHotKeyID(signature: OSType(0x53434B54), id: 1)
+        let captureHotKeyID = EventHotKeyID(signature: OSType(0x53434B54), id: 1)
         RegisterEventHotKey(
             UInt32(kVK_ANSI_A),
             UInt32(controlKey | cmdKey),
-            hotKeyID,
+            captureHotKeyID,
             GetApplicationEventTarget(),
             0,
-            &hotKeyRef
+            &captureHotKeyRef
+        )
+
+        let recordingHotKeyID = EventHotKeyID(signature: OSType(0x53434B54), id: 2)
+        RegisterEventHotKey(
+            UInt32(kVK_ANSI_R),
+            UInt32(controlKey | cmdKey),
+            recordingHotKeyID,
+            GetApplicationEventTarget(),
+            0,
+            &recordingHotKeyRef
         )
     }
 
     @objc private func beginCapture() {
+        guard screenRecorder == nil else {
+            showError("正在录制", detail: "请先停止当前录制，再开始截图。")
+            return
+        }
         captureController?.close()
         captureController = CaptureController { [weak self] result, controller in
             self?.finishCapture(result, controller: controller)
@@ -294,7 +373,149 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         updateChecker.check()
     }
 
+    @objc private func toggleRecording() {
+        if screenRecorder != nil {
+            stopRecording()
+        } else {
+            beginRecordingSelection()
+        }
+    }
+
+    private func beginRecordingSelection() {
+        captureController?.close()
+        captureController = nil
+        recordingSelectionController?.close()
+        recordingSelectionController = RecordingSelectionController { [weak self] result, controller in
+            self?.finishRecordingSelection(result, controller: controller)
+        }
+        recordingSelectionController?.begin()
+    }
+
+    private func finishRecordingSelection(_ result: RegionSelectionResult, controller: RecordingSelectionController) {
+        defer {
+            controller.close()
+            if recordingSelectionController === controller {
+                recordingSelectionController = nil
+            }
+        }
+
+        guard result == .start, let region = controller.selectedRegion() else { return }
+        startRecording(region)
+    }
+
+    private func startRecording(_ region: RecordingRegion) {
+        do {
+            let url = try makeRecordingOutputURL()
+            let recorder = ScreenRecordingSession(region: region, outputURL: url)
+            recorder.onStart = { [weak self] in
+                self?.ensureStatusItemForActiveRecording()
+                self?.updateRecordingMenu()
+            }
+            recorder.onFinish = { [weak self] url, errorMessage in
+                self?.finishRecording(outputURL: url, errorMessage: errorMessage)
+            }
+            screenRecorder = recorder
+            ensureStatusItemForActiveRecording()
+            updateRecordingMenu()
+            Task { [weak self] in
+                do {
+                    try await recorder.start()
+                } catch {
+                    await MainActor.run {
+                        guard self?.screenRecorder === recorder else { return }
+                        self?.screenRecorder = nil
+                        self?.updateRecordingMenu()
+                        self?.removeTemporaryStatusItemIfNeeded()
+                        self?.showError("录制启动失败", detail: error.localizedDescription)
+                    }
+                }
+            }
+        } catch {
+            showError("录制启动失败", detail: error.localizedDescription)
+        }
+    }
+
+    private func stopRecording() {
+        recordingMenuItem?.isEnabled = false
+        screenRecorder?.stop()
+    }
+
+    private func finishRecording(outputURL: URL, errorMessage: String?) {
+        screenRecorder = nil
+        updateRecordingMenu()
+        removeTemporaryStatusItemIfNeeded()
+
+        if let errorMessage {
+            showError("录制保存失败", detail: errorMessage)
+            return
+        }
+
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "录制已保存"
+        alert.informativeText = outputURL.path
+        alert.addButton(withTitle: "在 Finder 中显示")
+        alert.addButton(withTitle: "好")
+        if alert.runModal() == .alertFirstButtonReturn {
+            NSWorkspace.shared.activateFileViewerSelecting([outputURL])
+        }
+    }
+
+    private func ensureStatusItemForActiveRecording() {
+        if statusItem == nil {
+            installStatusItem()
+            statusItemWasTemporarilyShownForRecording = true
+        }
+    }
+
+    private func removeTemporaryStatusItemIfNeeded() {
+        guard statusItemWasTemporarilyShownForRecording, !UserDefaults.standard.bool(forKey: showStatusItemKey), let statusItem else {
+            return
+        }
+        NSStatusBar.system.removeStatusItem(statusItem)
+        self.statusItem = nil
+        statusMenu = nil
+        captureMenuItem = nil
+        recordingMenuItem = nil
+        statusItemWasTemporarilyShownForRecording = false
+    }
+
+    private func updateRecordingMenu() {
+        let isRecording = screenRecorder != nil
+        recordingMenuItem?.title = isRecording ? "停止录制" : "开始录制"
+        recordingMenuItem?.isEnabled = true
+        captureMenuItem?.isEnabled = !isRecording
+        statusItem?.button?.image = NSImage(
+            systemSymbolName: isRecording ? "record.circle.fill" : "viewfinder",
+            accessibilityDescription: appName
+        )
+        statusItem?.button?.toolTip = isRecording ? "\(appName) 正在录制" : "\(appName) 截图"
+    }
+
+    private func makeRecordingOutputURL() throws -> URL {
+        let folder = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Movies", isDirectory: true)
+            .appendingPathComponent("SnapCut", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let baseName = "SnapCut-录制-\(formatter.string(from: Date()))"
+        var url = folder.appendingPathComponent("\(baseName).mov")
+        var suffix = 2
+        while FileManager.default.fileExists(atPath: url.path) {
+            url = folder.appendingPathComponent("\(baseName)-\(suffix).mov")
+            suffix += 1
+        }
+        return url
+    }
+
     @objc private func quit() {
+        if screenRecorder != nil {
+            stopRecording()
+            return
+        }
         NSApp.terminate(nil)
     }
 }
@@ -517,6 +738,644 @@ private final class CaptureController: NSObject {
 private final class CapturePanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+}
+
+@MainActor
+private final class RecordingSelectionController: NSObject {
+    private let completion: (RegionSelectionResult, RecordingSelectionController) -> Void
+    private var panel: NSPanel?
+    private var view: RecordingSelectionView?
+    private var displayID: CGDirectDisplayID = CGMainDisplayID()
+    private var scale: CGFloat = 1
+
+    init(completion: @escaping (RegionSelectionResult, RecordingSelectionController) -> Void) {
+        self.completion = completion
+    }
+
+    func begin() {
+        guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "需要屏幕录制权限"
+            alert.informativeText = "请在“系统设置 → 隐私与安全性 → 屏幕录制”中允许 SnapCut，然后重新录制。"
+            alert.runModal()
+            completion(.cancel, self)
+            return
+        }
+
+        let mouse = NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? NSScreen.main else {
+            completion(.cancel, self)
+            return
+        }
+
+        scale = screen.backingScaleFactor
+        if let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber {
+            displayID = CGDirectDisplayID(screenNumber.uint32Value)
+        } else {
+            displayID = CGMainDisplayID()
+        }
+
+        let image = CGDisplayCreateImage(displayID)
+        let selectionView = RecordingSelectionView(frame: CGRect(origin: .zero, size: screen.frame.size))
+        selectionView.image = image
+        selectionView.displayScale = scale
+        selectionView.windowSnapRects = WindowSnapProvider.windowRects(for: displayID, screenSize: screen.frame.size)
+        selectionView.onResult = { [weak self] result in
+            self?.complete(result)
+        }
+        view = selectionView
+
+        let selectionPanel = CapturePanel(
+            contentRect: screen.frame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        selectionPanel.isOpaque = true
+        selectionPanel.backgroundColor = .black
+        selectionPanel.level = .screenSaver
+        selectionPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        selectionPanel.hidesOnDeactivate = false
+        selectionPanel.ignoresMouseEvents = false
+        selectionPanel.hasShadow = false
+        selectionPanel.contentView = selectionView
+        panel = selectionPanel
+
+        NSApp.activate(ignoringOtherApps: true)
+        selectionPanel.makeKeyAndOrderFront(nil)
+        selectionPanel.makeFirstResponder(selectionView)
+    }
+
+    func selectedRegion() -> RecordingRegion? {
+        guard let selection = view?.selection?.standardized, selection.width > 4, selection.height > 4 else {
+            return nil
+        }
+        return RecordingRegion(
+            displayID: displayID,
+            localRect: selection,
+            scale: scale
+        )
+    }
+
+    func close() {
+        panel?.orderOut(nil)
+        panel?.close()
+        panel = nil
+        view = nil
+    }
+
+    private func complete(_ result: RegionSelectionResult) {
+        completion(result, self)
+    }
+}
+
+@MainActor
+private final class RecordingSelectionView: NSView {
+    var image: CGImage?
+    var displayScale: CGFloat = 1
+    var windowSnapRects: [CGRect] = []
+    var onResult: ((RegionSelectionResult) -> Void)?
+    private(set) var selection: CGRect?
+
+    private var interaction: RegionSelectionInteraction = .idle
+    private var hoverWindowRect: CGRect?
+    private var currentMouse: CGPoint?
+    private var toolbar: NSVisualEffectView?
+
+    override var isFlipped: Bool { true }
+    override var acceptsFirstResponder: Bool { true }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas {
+            removeTrackingArea(area)
+        }
+        addTrackingArea(
+            NSTrackingArea(
+                rect: .zero,
+                options: [.activeAlways, .inVisibleRect, .mouseMoved, .mouseEnteredAndExited],
+                owner: self,
+                userInfo: nil
+            )
+        )
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        drawBackground()
+
+        if let selection {
+            drawDimmedLayer(around: selection, in: context)
+            drawSelection(selection, in: context)
+            drawSizeLabel(for: selection)
+        } else {
+            context.setFillColor(NSColor.black.withAlphaComponent(0.34).cgColor)
+            context.fill(bounds)
+            if let hoverWindowRect {
+                drawHoverWindow(hoverWindowRect, in: context)
+            } else {
+                drawIntroHint()
+            }
+        }
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        let point = clamp(convert(event.locationInWindow, from: nil), to: bounds)
+        currentMouse = point
+        if selection == nil {
+            hoverWindowRect = windowSnapRects.first(where: { $0.insetBy(dx: -2, dy: -2).contains(point) })
+        }
+        needsDisplay = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        currentMouse = nil
+        hoverWindowRect = nil
+        needsDisplay = true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = clamp(convert(event.locationInWindow, from: nil), to: bounds)
+        currentMouse = point
+        if toolbar?.frame.contains(point) == true {
+            needsDisplay = true
+            return
+        }
+
+        if let selection {
+            if let handle = resizeHandle(at: point, for: selection) {
+                interaction = .resizing(handle: handle, original: selection)
+            } else if selection.contains(point) {
+                interaction = .moving(start: point, original: selection)
+            } else {
+                removeToolbar()
+                interaction = .drawing(start: point)
+                self.selection = CGRect(origin: point, size: .zero)
+            }
+        } else {
+            interaction = .drawing(start: point)
+            selection = CGRect(origin: point, size: .zero)
+        }
+        needsDisplay = true
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        let point = clamp(convert(event.locationInWindow, from: nil), to: bounds)
+        currentMouse = point
+        switch interaction {
+        case .idle:
+            break
+        case .drawing(let start):
+            let raw = CGRect(
+                x: min(start.x, point.x),
+                y: min(start.y, point.y),
+                width: abs(point.x - start.x),
+                height: abs(point.y - start.y)
+            )
+            selection = snapped(raw.standardized, threshold: 8)
+            hoverWindowRect = nil
+        case .moving(let start, let original):
+            let delta = CGPoint(x: point.x - start.x, y: point.y - start.y)
+            selection = clamp(original.offsetBy(dx: delta.x, dy: delta.y), inside: bounds)
+            repositionToolbar()
+        case .resizing(let handle, let original):
+            selection = snapped(resized(original, by: handle, to: point).standardized, threshold: 8)
+            repositionToolbar()
+        }
+        needsDisplay = true
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        let point = clamp(convert(event.locationInWindow, from: nil), to: bounds)
+        currentMouse = point
+        switch interaction {
+        case .drawing(let start):
+            let clickDistance = distance(start, point)
+            if clickDistance < 4, let hoverWindowRect {
+                selection = hoverWindowRect
+            }
+            guard let selection, selection.width > 4, selection.height > 4 else {
+                self.selection = nil
+                removeToolbar()
+                needsDisplay = true
+                interaction = .idle
+                return
+            }
+            self.selection = clamp(selection.standardized, inside: bounds)
+            addToolbar()
+        case .moving, .resizing:
+            addToolbar()
+        case .idle:
+            break
+        }
+        interaction = .idle
+        needsDisplay = true
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 {
+            onResult?(.cancel)
+        } else if event.keyCode == 36, selection != nil {
+            onResult?(.start)
+        } else {
+            super.keyDown(with: event)
+        }
+    }
+
+    private func drawBackground() {
+        NSColor.black.setFill()
+        bounds.fill()
+        if let image {
+            let nsImage = NSImage(cgImage: image, size: bounds.size)
+            nsImage.draw(
+                in: bounds,
+                from: .zero,
+                operation: .copy,
+                fraction: 1,
+                respectFlipped: true,
+                hints: [.interpolation: NSImageInterpolation.high]
+            )
+        }
+    }
+
+    private func drawDimmedLayer(around selection: CGRect, in context: CGContext) {
+        context.setFillColor(NSColor.black.withAlphaComponent(0.42).cgColor)
+        context.fill(CGRect(x: 0, y: 0, width: bounds.width, height: selection.minY))
+        context.fill(CGRect(x: 0, y: selection.maxY, width: bounds.width, height: bounds.height - selection.maxY))
+        context.fill(CGRect(x: 0, y: selection.minY, width: selection.minX, height: selection.height))
+        context.fill(CGRect(x: selection.maxX, y: selection.minY, width: bounds.width - selection.maxX, height: selection.height))
+    }
+
+    private func drawSelection(_ rect: CGRect, in context: CGContext) {
+        context.saveGState()
+        context.setStrokeColor(NSColor.systemRed.cgColor)
+        context.setLineWidth(2)
+        context.stroke(rect.insetBy(dx: 1, dy: 1))
+        for (_, handleRect) in handleRects(for: rect) {
+            context.setFillColor(NSColor.white.cgColor)
+            context.fill(handleRect)
+            context.setStrokeColor(NSColor.systemRed.cgColor)
+            context.setLineWidth(1)
+            context.stroke(handleRect)
+        }
+        context.restoreGState()
+    }
+
+    private func drawHoverWindow(_ rect: CGRect, in context: CGContext) {
+        context.saveGState()
+        context.setFillColor(NSColor.systemRed.withAlphaComponent(0.12).cgColor)
+        context.fill(rect)
+        context.setStrokeColor(NSColor.systemRed.cgColor)
+        context.setLineWidth(3)
+        context.stroke(rect.insetBy(dx: 1.5, dy: 1.5))
+        context.restoreGState()
+    }
+
+    private func drawIntroHint() {
+        let text = "选择录制区域"
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 15, weight: .medium),
+            .foregroundColor: NSColor.white.withAlphaComponent(0.9),
+        ]
+        let size = text.size(withAttributes: attributes)
+        text.draw(
+            at: CGPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2),
+            withAttributes: attributes
+        )
+    }
+
+    private func drawSizeLabel(for rect: CGRect) {
+        let text = "\(Int(rect.width * displayScale)) × \(Int(rect.height * displayScale))"
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium),
+            .foregroundColor: NSColor.white,
+        ]
+        let size = text.size(withAttributes: attributes)
+        let labelRect = CGRect(
+            x: min(max(8, rect.minX), bounds.width - size.width - 16),
+            y: max(8, rect.minY - size.height - 8),
+            width: size.width + 12,
+            height: size.height + 6
+        )
+        NSColor.black.withAlphaComponent(0.58).setFill()
+        NSBezierPath(roundedRect: labelRect, xRadius: 5, yRadius: 5).fill()
+        text.draw(at: CGPoint(x: labelRect.minX + 6, y: labelRect.minY + 3), withAttributes: attributes)
+    }
+
+    private func addToolbar() {
+        guard let selection else { return }
+        if toolbar == nil {
+            let bar = NSVisualEffectView(frame: CGRect(x: 0, y: 0, width: 154, height: 42))
+            bar.material = .hudWindow
+            bar.state = .active
+            bar.wantsLayer = true
+            bar.layer?.cornerRadius = 10
+            bar.layer?.masksToBounds = true
+
+            let start = makeButton("开始录制", action: #selector(startRecording))
+            start.frame = CGRect(x: 10, y: 7, width: 82, height: 28)
+            let cancel = makeButton("取消", action: #selector(cancelRecording))
+            cancel.frame = CGRect(x: 98, y: 7, width: 46, height: 28)
+            bar.addSubview(start)
+            bar.addSubview(cancel)
+            addSubview(bar)
+            toolbar = bar
+        }
+        repositionToolbar(for: selection)
+    }
+
+    private func repositionToolbar() {
+        guard let selection else { return }
+        repositionToolbar(for: selection)
+    }
+
+    private func repositionToolbar(for selection: CGRect) {
+        guard let toolbar else { return }
+        let margin: CGFloat = 12
+        let barWidth = toolbar.frame.width
+        let barHeight = toolbar.frame.height
+        let x = min(max(margin, selection.minX), max(margin, bounds.width - barWidth - margin))
+        let y = selection.maxY + margin <= bounds.height - barHeight ? selection.maxY + margin : max(margin, selection.minY - barHeight - margin)
+        toolbar.frame.origin = CGPoint(x: x, y: y)
+    }
+
+    private func removeToolbar() {
+        toolbar?.removeFromSuperview()
+        toolbar = nil
+    }
+
+    private func makeButton(_ title: String, action: Selector) -> NSButton {
+        let button = NSButton(title: title, target: self, action: action)
+        button.bezelStyle = .texturedRounded
+        button.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        button.focusRingType = .none
+        return button
+    }
+
+    private func resizeHandle(at point: CGPoint, for rect: CGRect) -> ResizeHandle? {
+        handleRects(for: rect).first { $0.rect.contains(point) }?.handle
+    }
+
+    private func handleRects(for rect: CGRect) -> [(handle: ResizeHandle, rect: CGRect)] {
+        let box = rect.standardized
+        let size: CGFloat = 9
+        let half = size / 2
+        let centers: [(ResizeHandle, CGPoint)] = [
+            (.topLeft, CGPoint(x: box.minX, y: box.minY)),
+            (.top, CGPoint(x: box.midX, y: box.minY)),
+            (.topRight, CGPoint(x: box.maxX, y: box.minY)),
+            (.right, CGPoint(x: box.maxX, y: box.midY)),
+            (.bottomRight, CGPoint(x: box.maxX, y: box.maxY)),
+            (.bottom, CGPoint(x: box.midX, y: box.maxY)),
+            (.bottomLeft, CGPoint(x: box.minX, y: box.maxY)),
+            (.left, CGPoint(x: box.minX, y: box.midY)),
+        ]
+        return centers.map { handle, center in
+            (handle, CGRect(x: center.x - half, y: center.y - half, width: size, height: size))
+        }
+    }
+
+    private func resized(_ rect: CGRect, by handle: ResizeHandle, to point: CGPoint) -> CGRect {
+        var minX = rect.minX
+        var minY = rect.minY
+        var maxX = rect.maxX
+        var maxY = rect.maxY
+        switch handle {
+        case .topLeft:
+            minX = point.x
+            minY = point.y
+        case .top:
+            minY = point.y
+        case .topRight:
+            maxX = point.x
+            minY = point.y
+        case .right:
+            maxX = point.x
+        case .bottomRight:
+            maxX = point.x
+            maxY = point.y
+        case .bottom:
+            maxY = point.y
+        case .bottomLeft:
+            minX = point.x
+            maxY = point.y
+        case .left:
+            minX = point.x
+        }
+        let standardized = CGRect(x: min(minX, maxX), y: min(minY, maxY), width: abs(maxX - minX), height: abs(maxY - minY))
+        return standardized.width < 8 || standardized.height < 8 ? rect : standardized
+    }
+
+    private func snapped(_ rect: CGRect, threshold: CGFloat) -> CGRect {
+        var snapped = rect.standardized
+        let candidates = [bounds] + windowSnapRects
+        for candidate in candidates {
+            if abs(snapped.minX - candidate.minX) <= threshold {
+                snapped.origin.x = candidate.minX
+            }
+            if abs(snapped.maxX - candidate.maxX) <= threshold {
+                snapped.size.width = candidate.maxX - snapped.minX
+            }
+            if abs(snapped.minY - candidate.minY) <= threshold {
+                snapped.origin.y = candidate.minY
+            }
+            if abs(snapped.maxY - candidate.maxY) <= threshold {
+                snapped.size.height = candidate.maxY - snapped.minY
+            }
+        }
+        return clamp(snapped.standardized, inside: bounds)
+    }
+
+    @objc private func startRecording() { onResult?(.start) }
+    @objc private func cancelRecording() { onResult?(.cancel) }
+}
+
+private final class ScreenRecordingSession: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+    private let region: RecordingRegion
+    private let outputURL: URL
+    private let sampleQueue = DispatchQueue(label: "com.felixkoh.snapcut.native.recording.samples")
+    private var stream: SCStream?
+    private var writer: AVAssetWriter?
+    private var videoInput: AVAssetWriterInput?
+    private var startedWriting = false
+    private var stopRequested = false
+    private var finished = false
+
+    var onStart: (@MainActor @Sendable () -> Void)?
+    var onFinish: (@MainActor @Sendable (URL, String?) -> Void)?
+
+    init(region: RecordingRegion, outputURL: URL) {
+        self.region = region
+        self.outputURL = outputURL
+        super.init()
+    }
+
+    func start() async throws {
+        let content = try await SCShareableContent.current
+        guard let display = content.displays.first(where: { $0.displayID == region.displayID }) else {
+            throw NSError(
+                domain: "SnapCutRecording",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "没有找到要录制的显示器。"]
+            )
+        }
+
+        try? FileManager.default.removeItem(at: outputURL)
+        let outputSize = region.outputPixelSize
+        let width = Int(outputSize.width)
+        let height = Int(outputSize.height)
+        let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
+        let input = AVAssetWriterInput(
+            mediaType: .video,
+            outputSettings: [
+                AVVideoCodecKey: AVVideoCodecType.h264,
+                AVVideoWidthKey: width,
+                AVVideoHeightKey: height,
+                AVVideoCompressionPropertiesKey: [
+                    AVVideoAverageBitRateKey: max(2_000_000, width * height * 4),
+                ],
+            ]
+        )
+        input.expectsMediaDataInRealTime = true
+        guard writer.canAdd(input) else {
+            throw NSError(
+                domain: "SnapCutRecording",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "无法创建录制文件写入器。"]
+            )
+        }
+        writer.add(input)
+        self.writer = writer
+        videoInput = input
+
+        let filter = SCContentFilter(display: display, excludingWindows: [])
+        let configuration = SCStreamConfiguration()
+        configuration.width = width
+        configuration.height = height
+        configuration.sourceRect = region.localRect
+        configuration.destinationRect = CGRect(x: 0, y: 0, width: width, height: height)
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+        configuration.queueDepth = 4
+        configuration.pixelFormat = kCVPixelFormatType_32BGRA
+        configuration.showsCursor = true
+        configuration.capturesAudio = false
+
+        let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
+        try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: sampleQueue)
+        self.stream = stream
+        try await stream.startCapture()
+
+        if finished || stopRequested {
+            try? await stream.stopCapture()
+            finish(errorMessage: nil)
+            return
+        }
+
+        await MainActor.run {
+            onStart?()
+        }
+    }
+
+    func stop() {
+        stopRequested = true
+        guard let stream else {
+            finish(errorMessage: nil)
+            return
+        }
+        Task {
+            do {
+                try await stream.stopCapture()
+                finish(errorMessage: nil)
+            } catch {
+                finish(errorMessage: error.localizedDescription)
+            }
+        }
+    }
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard type == .screen, sampleBuffer.isValid, CMSampleBufferDataIsReady(sampleBuffer), !finished else { return }
+        guard let writer, let videoInput else { return }
+
+        if !startedWriting {
+            let startTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+            guard writer.startWriting() else {
+                finish(errorMessage: writer.error?.localizedDescription ?? "录制文件写入启动失败。")
+                return
+            }
+            writer.startSession(atSourceTime: startTime)
+            startedWriting = true
+        }
+
+        if videoInput.isReadyForMoreMediaData {
+            videoInput.append(sampleBuffer)
+        }
+
+        if writer.status == .failed {
+            finish(errorMessage: writer.error?.localizedDescription ?? "录制文件写入失败。")
+        }
+    }
+
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        finish(errorMessage: error.localizedDescription)
+    }
+
+    private func finish(errorMessage: String?) {
+        guard !finished else { return }
+        finished = true
+
+        sampleQueue.async { [self] in
+            let finishWriter = {
+                let onFinish = self.onFinish
+                let outputURL = self.outputURL
+                Task { @MainActor in
+                    onFinish?(outputURL, errorMessage)
+                }
+            }
+
+            guard let writer = self.writer, let videoInput = self.videoInput else {
+                finishWriter()
+                return
+            }
+
+            switch writer.status {
+            case .unknown:
+                writer.cancelWriting()
+                let onFinish = self.onFinish
+                let outputURL = self.outputURL
+                Task { @MainActor in
+                    onFinish?(outputURL, errorMessage ?? "录制没有收到可写入的画面。")
+                }
+            case .writing:
+                videoInput.markAsFinished()
+                let message = errorMessage ?? writer.error?.localizedDescription
+                writer.finishWriting {
+                    let onFinish = self.onFinish
+                    let outputURL = self.outputURL
+                    Task { @MainActor in
+                        onFinish?(outputURL, message)
+                    }
+                }
+            case .completed:
+                finishWriter()
+            case .failed:
+                let onFinish = self.onFinish
+                let outputURL = self.outputURL
+                let message = errorMessage ?? writer.error?.localizedDescription ?? "录制保存失败。"
+                Task { @MainActor in
+                    onFinish?(outputURL, message)
+                }
+            case .cancelled:
+                let onFinish = self.onFinish
+                let outputURL = self.outputURL
+                Task { @MainActor in
+                    onFinish?(outputURL, errorMessage ?? "录制已取消。")
+                }
+            @unknown default:
+                finishWriter()
+            }
+        }
+    }
 }
 
 private final class WindowSnapProvider {
