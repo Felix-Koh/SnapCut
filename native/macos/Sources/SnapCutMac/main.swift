@@ -7,7 +7,7 @@ import ScreenCaptureKit
 import UniformTypeIdentifiers
 
 private let appName = "SnapCut"
-private let nativeVersion = "0.3.6"
+private let nativeVersion = "0.3.7"
 private let showStatusItemKey = "SnapCutShowStatusItem"
 
 private enum CaptureResult {
@@ -19,6 +19,24 @@ private enum CaptureResult {
 private enum RegionSelectionResult {
     case start
     case cancel
+}
+
+@MainActor
+private enum ScreenCaptureAccess {
+    private static var isGrantedForSession = false
+
+    static func ensureGranted() -> Bool {
+        if isGrantedForSession {
+            return true
+        }
+        let granted = CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess()
+        isGrantedForSession = granted
+        return granted
+    }
+
+    static func invalidate() {
+        isGrantedForSession = false
+    }
 }
 
 private struct RecordingRegion {
@@ -162,14 +180,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var updateChecker = NativeUpdateChecker()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if UserDefaults.standard.object(forKey: showStatusItemKey) == nil {
-            UserDefaults.standard.set(true, forKey: showStatusItemKey)
-        }
+        UserDefaults.standard.register(defaults: [showStatusItemKey: true])
         installGlobalHotKey()
         if UserDefaults.standard.bool(forKey: showStatusItemKey) {
-            DispatchQueue.main.async { [weak self] in
-                self?.installStatusItem()
-            }
+            installStatusItem()
         }
     }
 
@@ -216,8 +230,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func installStatusItem() {
+        guard statusItem == nil else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = NSImage(systemSymbolName: "viewfinder", accessibilityDescription: appName)
         item.button?.toolTip = "\(appName) 截图"
 
         let menu = NSMenu()
@@ -273,10 +287,15 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                 nil,
                 &hotKeyID
             )
-            if hotKeyID.id == 1 {
-                Task { @MainActor in delegate.beginCapture() }
-            } else if hotKeyID.id == 2 {
-                Task { @MainActor in delegate.toggleRecording() }
+            let id = hotKeyID.id
+            if Thread.isMainThread {
+                MainActor.assumeIsolated {
+                    delegate.handleGlobalHotKey(id)
+                }
+            } else {
+                Task { @MainActor in
+                    delegate.handleGlobalHotKey(id)
+                }
             }
             return noErr
         }
@@ -310,6 +329,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             0,
             &recordingHotKeyRef
         )
+    }
+
+    private func handleGlobalHotKey(_ id: UInt32) {
+        if id == 1 {
+            beginCapture()
+        } else if id == 2 {
+            toggleRecording()
+        }
     }
 
     @objc private func beginCapture() {
@@ -667,7 +694,7 @@ private final class CaptureController: NSObject {
     }
 
     func begin() {
-        guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
+        guard ScreenCaptureAccess.ensureGranted() else {
             let alert = NSAlert()
             alert.alertStyle = .warning
             alert.messageText = "需要屏幕录制权限"
@@ -689,7 +716,13 @@ private final class CaptureController: NSObject {
         } else {
             displayID = CGMainDisplayID()
         }
+        let screenSize = screen.frame.size
+        let windowRectsTask = Task.detached(priority: .userInitiated) {
+            WindowSnapProvider.windowRects(for: displayID, screenSize: screenSize)
+        }
         guard let image = CGDisplayCreateImage(displayID) else {
+            windowRectsTask.cancel()
+            ScreenCaptureAccess.invalidate()
             completion(.cancel, self)
             return
         }
@@ -699,7 +732,6 @@ private final class CaptureController: NSObject {
         captureView.image = image
         captureView.displayScale = scale
         captureView.bottomAccessoryInset = max(0, screen.visibleFrame.minY - screen.frame.minY)
-        captureView.windowSnapRects = WindowSnapProvider.windowRects(for: displayID, screenSize: screen.frame.size)
         captureView.onResult = { [weak self] result in
             self?.complete(result)
         }
@@ -724,6 +756,11 @@ private final class CaptureController: NSObject {
         NSApp.activate(ignoringOtherApps: true)
         capturePanel.makeKeyAndOrderFront(nil)
         capturePanel.makeFirstResponder(captureView)
+
+        Task { [weak captureView] in
+            let rects = await windowRectsTask.value
+            captureView?.updateWindowSnapRects(rects)
+        }
     }
 
     private func complete(_ result: CaptureResult) {
@@ -867,7 +904,7 @@ private final class RecordingSelectionController: NSObject {
     }
 
     func begin() {
-        guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
+        guard ScreenCaptureAccess.ensureGranted() else {
             let alert = NSAlert()
             alert.alertStyle = .warning
             alert.messageText = "需要屏幕录制权限"
@@ -890,12 +927,19 @@ private final class RecordingSelectionController: NSObject {
             displayID = CGMainDisplayID()
         }
 
-        let image = CGDisplayCreateImage(displayID)
+        let targetDisplayID = displayID
+        let screenSize = screen.frame.size
+        let windowRectsTask = Task.detached(priority: .userInitiated) {
+            WindowSnapProvider.windowRects(for: targetDisplayID, screenSize: screenSize)
+        }
+        let image = CGDisplayCreateImage(targetDisplayID)
+        if image == nil {
+            ScreenCaptureAccess.invalidate()
+        }
         let selectionView = RecordingSelectionView(frame: CGRect(origin: .zero, size: screen.frame.size))
         selectionView.image = image
         selectionView.displayScale = scale
         selectionView.bottomAccessoryInset = max(0, screen.visibleFrame.minY - screen.frame.minY)
-        selectionView.windowSnapRects = WindowSnapProvider.windowRects(for: displayID, screenSize: screen.frame.size)
         selectionView.onResult = { [weak self] result in
             self?.complete(result)
         }
@@ -920,6 +964,11 @@ private final class RecordingSelectionController: NSObject {
         NSApp.activate(ignoringOtherApps: true)
         selectionPanel.makeKeyAndOrderFront(nil)
         selectionPanel.makeFirstResponder(selectionView)
+
+        Task { [weak selectionView] in
+            let rects = await windowRectsTask.value
+            selectionView?.updateWindowSnapRects(rects)
+        }
     }
 
     func selectedRegion() -> RecordingRegion? {
@@ -961,6 +1010,13 @@ private final class RecordingSelectionView: NSView {
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
+
+    func updateWindowSnapRects(_ rects: [CGRect]) {
+        windowSnapRects = rects
+        guard selection == nil, let currentMouse else { return }
+        hoverWindowRect = rects.first(where: { $0.insetBy(dx: -2, dy: -2).contains(currentMouse) })
+        needsDisplay = true
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -1068,8 +1124,11 @@ private final class RecordingSelectionView: NSView {
         switch interaction {
         case .drawing(let start):
             let clickDistance = distance(start, point)
-            if clickDistance < 4, let hoverWindowRect {
-                selection = hoverWindowRect
+            if
+                clickDistance < 4,
+                let snappedWindow = windowSnapRects.first(where: { $0.insetBy(dx: -2, dy: -2).contains(point) }) ?? hoverWindowRect
+            {
+                selection = snappedWindow
             }
             guard let selection, selection.width > 4, selection.height > 4 else {
                 self.selection = nil
@@ -1744,6 +1803,13 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
 
+    func updateWindowSnapRects(_ rects: [CGRect]) {
+        windowSnapRects = rects
+        guard selection == nil, let currentMouse else { return }
+        hoverWindowRect = rects.first(where: { $0.insetBy(dx: -2, dy: -2).contains(currentMouse) })
+        needsDisplay = true
+    }
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         for area in trackingAreas {
@@ -1943,8 +2009,11 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
         case .drawingSelection(let start):
             defer { interaction = .idle }
             let clickDistance = distance(start, point)
-            if clickDistance < 4, let hoverWindowRect {
-                selection = hoverWindowRect
+            if
+                clickDistance < 4,
+                let snappedWindow = windowSnapRects.first(where: { $0.insetBy(dx: -2, dy: -2).contains(point) }) ?? hoverWindowRect
+            {
+                selection = snappedWindow
             }
             guard let selection, selection.width > 4, selection.height > 4 else {
                 self.selection = nil
