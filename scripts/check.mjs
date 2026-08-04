@@ -121,16 +121,15 @@ try {
   console.error(`Invalid release workflow YAML: ${error?.message || error}`);
   process.exit(1);
 }
-const macMatrix = workflow?.jobs?.['build-macos']?.strategy?.matrix?.include;
-const expectedMacMatrix = [
-  { arch: 'arm64', binary_arch: 'arm64', runner: 'macos-15' },
-];
 if (
-  !workflow?.jobs?.['build-windows'] ||
+  !workflow?.jobs?.['verify-version'] ||
+  workflow?.jobs?.['build-macos']?.['runs-on'] !== 'macos-15' ||
+  workflow?.jobs?.['build-macos']?.strategy ||
+  workflow?.jobs?.['build-windows'] ||
   !workflow?.jobs?.['publish-release'] ||
-  JSON.stringify(macMatrix) !== JSON.stringify(expectedMacMatrix)
+  !fs.readFileSync(workflowPath, 'utf8').includes('./native/macos/package-release.sh')
 ) {
-  console.error('Release workflow platform matrix is incomplete or has an unexpected architecture mapping.');
+  console.error('Release workflow must publish only the native Apple Silicon macOS application.');
   process.exit(1);
 }
 

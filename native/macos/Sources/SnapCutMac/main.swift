@@ -7,7 +7,7 @@ import ScreenCaptureKit
 import UniformTypeIdentifiers
 
 private let appName = "SnapCut"
-private let nativeVersion = "0.3.7"
+private let nativeVersion = "2.0.0"
 private let showStatusItemKey = "SnapCutShowStatusItem"
 
 private enum CaptureResult {
@@ -637,9 +637,9 @@ private final class NativeUpdateChecker {
 
                 let detail: String
                 if self.isVersion(tagName, newerThan: nativeVersion) {
-                    detail = "发现新版本 \(tagName)。原生版自动安装会在正式签名后启用，目前可以先打开发布页下载。"
+                    detail = "发现新版本 \(tagName)。请打开正式发布页下载并安装。"
                 } else {
-                    detail = "当前原生预览版 \(nativeVersion) 已是最新开发版本。"
+                    detail = "当前版本 \(nativeVersion) 已是最新正式版本。"
                 }
                 self.showUpdateResult(title: "更新检查完成", detail: detail, openURL: htmlURL)
             }
@@ -1397,7 +1397,7 @@ private final class RecordingSelectionView: NSView {
 private final class ScreenRecordingSession: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     private let region: RecordingRegion
     private let outputURL: URL
-    private let sampleQueue = DispatchQueue(label: "com.felixkoh.snapcut.native.recording.samples")
+    private let sampleQueue = DispatchQueue(label: "com.felixkoh.snapcut.recording.samples")
     private var stream: SCStream?
     private var writer: AVAssetWriter?
     private var videoInput: AVAssetWriterInput?

@@ -5,22 +5,30 @@
 	<key>CFBundleDisplayName</key>
 	<string>SnapCut</string>
 	<key>CFBundleExecutable</key>
-	<string>SnapCutMac</string>
+	<string>SnapCut</string>
+	<key>CFBundleIconFile</key>
+	<string>icon.icns</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.felixkoh.snapcut.native</string>
+	<string>com.felixkoh.snapcut</string>
 	<key>CFBundleName</key>
 	<string>SnapCut</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.3.7</string>
+	<string>2.0.0</string>
 	<key>CFBundleVersion</key>
-	<string>13</string>
+	<string>14</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026 Felix Koh</string>
 	<key>NSScreenCaptureUsageDescription</key>
-	<string>SnapCut 只在你按下截图快捷键并选择区域时读取屏幕画面。</string>
+	<string>SnapCut 只在你主动开始截图或屏幕录制并选择区域时读取屏幕画面。</string>
 </dict>
 </plist>

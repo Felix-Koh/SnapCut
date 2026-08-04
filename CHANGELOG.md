@@ -1,8 +1,8 @@
 # Changelog
 
-## Native macOS preview - 2026-08-03
+## 2.0.0 - 2026-08-04
 
-- 新增独立的 \`native/macos\` 原生工程，使用 Swift + AppKit
+- 将 Swift + AppKit 原生工程升级为正式维护主线，只发布 Apple Silicon macOS 版本
 - 完成菜单栏常驻、Control + Command + A 全局快捷键、当前显示器截图和选区框选
 - 加入窗口自动吸附、拖拽边缘贴近、像素放大镜和选区尺寸提示
 - 加入矩形、椭圆、箭头、画笔、马赛克和文字标注
@@ -20,7 +20,12 @@
 - 加入无声区域录制，菜单栏或 Control + Command + R 可开始/停止录制，录制文件自动保存到 \`~/Movies/SnapCut\`
 - 启动路径改成先注册快捷键并立即显示菜单栏图标，偏好设置和更新检查仍按需创建；截图权限结果在本次运行中复用，窗口识别与整屏取帧并行执行，缩短首次快捷键唤起等待
 - 加入偏好设置和检查更新入口
-- 原生版先作为开发预览，不替换当前 Electron 版本
+- 增加原生应用图标、arm64 固定构建、DMG/ZIP 打包和原生专用 GitHub Release 流程
+- Electron 通用版停在 1.2.8，保留历史安装包但停止维护
+
+## 旧版 Electron（Legacy）
+
+以下 1.x 版本是已停止维护的 Windows / macOS Electron 通用版历史记录。
 
 ## 1.2.6 - 2026-07-30
 

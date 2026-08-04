@@ -1,7 +1,7 @@
 {
   "name": "snapcut-desktop",
   "version": "1.2.8",
-  "description": "A fast, private screenshot and annotation tool for Windows and macOS.",
+  "description": "Legacy Electron source archive for the discontinued SnapCut 1.2.8 cross-platform edition.",
   "repository": {
     "type": "git",
     "url": "https://github.com/Felix-Koh/SnapCut.git"
