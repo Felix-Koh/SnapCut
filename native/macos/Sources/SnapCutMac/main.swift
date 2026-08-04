@@ -7,7 +7,7 @@ import ScreenCaptureKit
 import UniformTypeIdentifiers
 
 private let appName = "SnapCut"
-private let nativeVersion = "0.3.5"
+private let nativeVersion = "0.3.6"
 private let showStatusItemKey = "SnapCutShowStatusItem"
 
 private enum CaptureResult {
@@ -85,6 +85,15 @@ private enum CaptureTool: String, CaseIterable {
 private struct DrawingStyle {
     var color: NSColor
     var lineWidth: CGFloat
+}
+
+private struct MosaicGrid {
+    var sourceSize: CGSize
+    var destinationSize: CGSize
+    var columns: Int
+    var rows: Int
+    var bytesPerRow: Int
+    var pixels: [UInt8]
 }
 
 private enum ResizeHandle: CaseIterable {
@@ -723,7 +732,7 @@ private final class CaptureController: NSObject {
 
     func renderedCroppedImage() -> CGImage? {
         guard let sourceImage, let view else { return nil }
-        return view.renderedCroppedImage(from: sourceImage, scale: scale)
+        return view.renderedCroppedImage(from: sourceImage)
     }
 
     func close() {
@@ -1685,7 +1694,11 @@ private final class AnnotationItem: Equatable {
 
 @MainActor
 private final class CaptureView: NSView, NSTextFieldDelegate {
-    var image: CGImage?
+    var image: CGImage? {
+        didSet {
+            mosaicGrid = nil
+        }
+    }
     var displayScale: CGFloat = 1
     var bottomAccessoryInset: CGFloat = 0
     var windowSnapRects: [CGRect] = []
@@ -1722,6 +1735,11 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
     private var isMagnifierEnabled = true
     private var undoStack: [[AnnotationItem]] = []
     private var redoStack: [[AnnotationItem]] = []
+    private var mosaicGrid: MosaicGrid?
+
+    // Keep the pixel grid anchored to the frozen screenshot instead of rebuilding
+    // it from each brush stroke. This makes preview, editing, and export line up.
+    private let mosaicCellSize: CGFloat = 8
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -1750,7 +1768,7 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
             context.saveGState()
             context.clip(to: selection)
             for item in annotations where item.isExportable || item === editingTextItem {
-                drawAnnotation(item, in: context, exportScale: nil, cropOrigin: .zero)
+                drawAnnotation(item, in: context, cropOrigin: .zero)
             }
             context.restoreGState()
 
@@ -2084,11 +2102,37 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
         return true
     }
 
-    func renderedCroppedImage(from sourceImage: CGImage, scale: CGFloat) -> CGImage? {
+    func renderedCroppedImage(from sourceImage: CGImage) -> CGImage? {
         commitTextEditor()
         guard let selection, selection.width > 1, selection.height > 1 else { return nil }
-        let pixelWidth = max(1, Int((selection.width * scale).rounded()))
-        let pixelHeight = max(1, Int((selection.height * scale).rounded()))
+        guard bounds.width > 0, bounds.height > 0 else { return nil }
+        let scaleX = CGFloat(sourceImage.width) / bounds.width
+        let scaleY = CGFloat(sourceImage.height) / bounds.height
+        guard scaleX > 0, scaleY > 0 else { return nil }
+        let requestedCropRect = CGRect(
+            x: selection.minX * scaleX,
+            y: selection.minY * scaleY,
+            width: selection.width * scaleX,
+            height: selection.height * scaleY
+        )
+        let sourceBounds = CGRect(
+            x: 0,
+            y: 0,
+            width: CGFloat(sourceImage.width),
+            height: CGFloat(sourceImage.height)
+        )
+        let cropRect = requestedCropRect.integral.intersection(sourceBounds)
+        guard !cropRect.isNull, cropRect.width >= 1, cropRect.height >= 1 else { return nil }
+
+        // Use the exact integral source crop for both the bitmap size and the
+        // annotation origin. Rounding them separately can introduce a 1 px scale
+        // mismatch, which is especially visible along a mosaic brush edge.
+        let pixelWidth = Int(cropRect.width)
+        let pixelHeight = Int(cropRect.height)
+        let cropOrigin = CGPoint(
+            x: cropRect.minX / scaleX,
+            y: cropRect.minY / scaleY
+        )
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
         guard
             let context = CGContext(
@@ -2104,12 +2148,6 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
             return nil
         }
 
-        let cropRect = CGRect(
-            x: selection.minX * scale,
-            y: CGFloat(sourceImage.height) - selection.maxY * scale,
-            width: selection.width * scale,
-            height: selection.height * scale
-        ).integral
         guard let cropped = sourceImage.cropping(to: cropRect) else { return nil }
 
         context.interpolationQuality = .high
@@ -2117,11 +2155,11 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
 
         context.saveGState()
         context.translateBy(x: 0, y: CGFloat(pixelHeight))
-        context.scaleBy(x: scale, y: -scale)
+        context.scaleBy(x: scaleX, y: -scaleY)
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
         for item in annotations where item.isExportable && item.bounds.intersects(selection) {
-            drawAnnotation(item, in: context, exportScale: scale, cropOrigin: selection.origin)
+            drawAnnotation(item, in: context, cropOrigin: cropOrigin)
         }
         NSGraphicsContext.restoreGraphicsState()
         context.restoreGState()
@@ -2307,7 +2345,7 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
         }
     }
 
-    private func drawAnnotation(_ item: AnnotationItem, in context: CGContext, exportScale: CGFloat?, cropOrigin: CGPoint) {
+    private func drawAnnotation(_ item: AnnotationItem, in context: CGContext, cropOrigin: CGPoint) {
         context.saveGState()
         if cropOrigin != .zero {
             context.translateBy(x: -cropOrigin.x, y: -cropOrigin.y)
@@ -2328,7 +2366,7 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
         case .pen:
             drawPolyline(item.points, in: context)
         case .mosaic:
-            drawMosaicBrush(item, in: context, exportScale: exportScale, cropOrigin: cropOrigin)
+            drawMosaicBrush(item, in: context)
         case .text:
             drawText(item, in: context)
         case .select:
@@ -2408,77 +2446,103 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
         NSString(string: item.text).draw(with: textRect, options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attributes)
     }
 
-    private func drawMosaicBrush(_ item: AnnotationItem, in context: CGContext, exportScale: CGFloat?, cropOrigin: CGPoint) {
+    private func drawMosaicBrush(_ item: AnnotationItem, in context: CGContext) {
         let brushBounds = item.bounds.standardized.intersection(bounds)
         guard !brushBounds.isNull, brushBounds.width > 1, brushBounds.height > 1 else { return }
         context.saveGState()
         clipToBrushPath(points: item.points, lineWidth: item.lineWidth, in: context)
         context.clip()
-        drawMosaic(brushBounds, in: context, exportScale: exportScale, cropOrigin: cropOrigin, blockSize: max(4, min(12, item.lineWidth * 0.55)))
+        drawMosaicGrid(in: context, covering: brushBounds)
         context.restoreGState()
     }
 
-    private func drawMosaic(_ rect: CGRect, in context: CGContext, exportScale: CGFloat?, cropOrigin: CGPoint, blockSize: CGFloat) {
-        let scale = exportScale ?? displayScale
-        guard rect.width > 2, rect.height > 2 else {
-            context.setFillColor(NSColor.systemGray.withAlphaComponent(0.55).cgColor)
-            context.fill(rect)
-            return
-        }
+    private func drawMosaicGrid(in context: CGContext, covering rect: CGRect) {
+        guard let grid = mosaicGridData(), grid.columns > 0, grid.rows > 0 else { return }
+        let cellWidth = bounds.width / CGFloat(grid.columns)
+        let cellHeight = bounds.height / CGFloat(grid.rows)
+        guard cellWidth > 0, cellHeight > 0 else { return }
 
-        let imageSize = image.map { CGSize(width: CGFloat($0.width), height: CGFloat($0.height)) }
-            ?? CGSize(width: bounds.width * scale, height: bounds.height * scale)
-        guard let mosaicRect = pixelAlignedMosaicRect(for: rect, scale: scale, imageSize: imageSize) else {
-            return
-        }
+        let minColumn = max(0, min(grid.columns - 1, Int(floor(rect.minX / cellWidth))))
+        let maxColumn = max(0, min(grid.columns - 1, Int(floor(rect.maxX / cellWidth))))
+        let minRow = max(0, min(grid.rows - 1, Int(floor(rect.minY / cellHeight))))
+        let maxRow = max(0, min(grid.rows - 1, Int(floor(rect.maxY / cellHeight))))
 
-        let destinationRect = mosaicRect.destination
-        drawBlackWhiteMosaic(in: destinationRect, blockSize: blockSize, context: context)
-    }
-
-    private func drawBlackWhiteMosaic(in rect: CGRect, blockSize: CGFloat, context: CGContext) {
-        let size = max(3, blockSize)
-        let startColumn = Int(floor(rect.minX / size))
-        let startRow = Int(floor(rect.minY / size))
-        var y = CGFloat(startRow) * size
-
-        while y < rect.maxY {
-            var x = CGFloat(startColumn) * size
-            while x < rect.maxX {
-                let column = Int(floor(x / size))
-                let row = Int(floor(y / size))
-                let blockRect = CGRect(x: x, y: y, width: size, height: size).intersection(rect)
-                let isBlack = (column + row).isMultiple(of: 2)
-                context.setFillColor((isBlack ? NSColor.black : NSColor.white).cgColor)
-                context.fill(blockRect)
-                x += size
+        context.saveGState()
+        context.setBlendMode(.copy)
+        for row in minRow...maxRow {
+            let y0 = CGFloat(row) * cellHeight
+            let y1 = row == grid.rows - 1 ? bounds.height : CGFloat(row + 1) * cellHeight
+            for column in minColumn...maxColumn {
+                let offset = row * grid.bytesPerRow + column * 4
+                guard offset + 3 < grid.pixels.count else { continue }
+                context.setFillColor(
+                    red: CGFloat(grid.pixels[offset]) / 255,
+                    green: CGFloat(grid.pixels[offset + 1]) / 255,
+                    blue: CGFloat(grid.pixels[offset + 2]) / 255,
+                    alpha: CGFloat(grid.pixels[offset + 3]) / 255
+                )
+                let x0 = CGFloat(column) * cellWidth
+                let x1 = column == grid.columns - 1 ? bounds.width : CGFloat(column + 1) * cellWidth
+                context.fill(CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0))
             }
-            y += size
         }
+        context.restoreGState()
     }
 
-    private func pixelAlignedMosaicRect(for rect: CGRect, scale: CGFloat, imageSize: CGSize) -> (source: CGRect, destination: CGRect)? {
-        guard scale > 0, imageSize.width > 0, imageSize.height > 0 else { return nil }
-        let normalized = rect.standardized
-        let minPixelX = max(0, floor(normalized.minX * scale))
-        let maxPixelX = min(imageSize.width, ceil(normalized.maxX * scale))
-        let minPixelYFromTop = max(0, floor(normalized.minY * scale))
-        let maxPixelYFromTop = min(imageSize.height, ceil(normalized.maxY * scale))
-        guard maxPixelX > minPixelX, maxPixelYFromTop > minPixelYFromTop else { return nil }
+    private func mosaicGridData() -> MosaicGrid? {
+        guard let image, bounds.width > 0, bounds.height > 0 else { return nil }
+        let sourceSize = CGSize(width: CGFloat(image.width), height: CGFloat(image.height))
+        let destinationSize = bounds.size
+        if
+            let mosaicGrid,
+            mosaicGrid.sourceSize == sourceSize,
+            mosaicGrid.destinationSize == destinationSize
+        {
+            return mosaicGrid
+        }
 
-        let source = CGRect(
-            x: minPixelX,
-            y: imageSize.height - maxPixelYFromTop,
-            width: maxPixelX - minPixelX,
-            height: maxPixelYFromTop - minPixelYFromTop
+        let columns = max(1, Int(ceil(destinationSize.width / mosaicCellSize)))
+        let rows = max(1, Int(ceil(destinationSize.height / mosaicCellSize)))
+        let bytesPerRow = columns * 4
+        var pixels = [UInt8](repeating: 0, count: bytesPerRow * rows)
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        let rendered = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard
+                let reducedContext = CGContext(
+                    data: buffer.baseAddress,
+                    width: columns,
+                    height: rows,
+                    bitsPerComponent: 8,
+                    bytesPerRow: bytesPerRow,
+                    space: colorSpace,
+                    bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue
+                )
+            else {
+                return false
+            }
+
+            // Average the complete frozen screenshot once. The cached RGBA cells
+            // are then filled on the same global grid in preview and export, so
+            // Quartz cannot choose a different nearest-neighbour sampling phase.
+            reducedContext.interpolationQuality = .medium
+            reducedContext.draw(
+                image,
+                in: CGRect(x: 0, y: 0, width: columns, height: rows)
+            )
+            return true
+        }
+        guard rendered else { return nil }
+
+        let grid = MosaicGrid(
+            sourceSize: sourceSize,
+            destinationSize: destinationSize,
+            columns: columns,
+            rows: rows,
+            bytesPerRow: bytesPerRow,
+            pixels: pixels
         )
-        let destination = CGRect(
-            x: minPixelX / scale,
-            y: minPixelYFromTop / scale,
-            width: (maxPixelX - minPixelX) / scale,
-            height: (maxPixelYFromTop - minPixelYFromTop) / scale
-        )
-        return (source.integral, destination)
+        mosaicGrid = grid
+        return grid
     }
 
     private func drawMagnifier(at point: CGPoint) {
@@ -2487,14 +2551,16 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
         guard let image else { return }
         let lensSize: CGFloat = 112
         let sourceSize: CGFloat = 18
+        let scaleX = CGFloat(image.width) / max(1, bounds.width)
+        let scaleY = CGFloat(image.height) / max(1, bounds.height)
         let x = point.x + lensSize + 20 < bounds.width ? point.x + 18 : point.x - lensSize - 18
         let y = point.y + lensSize + 20 < bounds.height ? point.y + 18 : point.y - lensSize - 18
         let lensRect = CGRect(x: max(10, x), y: max(10, y), width: lensSize, height: lensSize)
         let cropRect = CGRect(
-            x: (point.x - sourceSize / 2) * displayScale,
-            y: CGFloat(image.height) - (point.y + sourceSize / 2) * displayScale,
-            width: sourceSize * displayScale,
-            height: sourceSize * displayScale
+            x: (point.x - sourceSize / 2) * scaleX,
+            y: (point.y - sourceSize / 2) * scaleY,
+            width: sourceSize * scaleX,
+            height: sourceSize * scaleY
         ).integral
         guard let crop = image.cropping(to: cropRect) else { return }
 
