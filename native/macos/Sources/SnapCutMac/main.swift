@@ -7,7 +7,7 @@ import ScreenCaptureKit
 import UniformTypeIdentifiers
 
 private let appName = "SnapCut"
-private let nativeVersion = "0.3.4"
+private let nativeVersion = "0.3.5"
 private let showStatusItemKey = "SnapCutShowStatusItem"
 
 private enum CaptureResult {
@@ -52,7 +52,7 @@ private enum CaptureTool: String, CaseIterable {
         case .ellipse: return "circle"
         case .arrow: return "arrow.up.right"
         case .pen: return "pencil.tip"
-        case .mosaic: return "paintbrush.pointed.fill"
+        case .mosaic: return "square.grid.3x3.fill"
         case .text: return "textformat"
         }
     }
@@ -2414,64 +2414,47 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
         context.saveGState()
         clipToBrushPath(points: item.points, lineWidth: item.lineWidth, in: context)
         context.clip()
-        drawMosaic(brushBounds, in: context, exportScale: exportScale, cropOrigin: cropOrigin)
+        drawMosaic(brushBounds, in: context, exportScale: exportScale, cropOrigin: cropOrigin, blockSize: max(4, min(12, item.lineWidth * 0.55)))
         context.restoreGState()
     }
 
-    private func drawMosaic(_ rect: CGRect, in context: CGContext, exportScale: CGFloat?, cropOrigin: CGPoint) {
+    private func drawMosaic(_ rect: CGRect, in context: CGContext, exportScale: CGFloat?, cropOrigin: CGPoint, blockSize: CGFloat) {
         let scale = exportScale ?? displayScale
-        guard
-            let image,
-            rect.width > 2,
-            rect.height > 2
-        else {
+        guard rect.width > 2, rect.height > 2 else {
             context.setFillColor(NSColor.systemGray.withAlphaComponent(0.55).cgColor)
             context.fill(rect)
             return
         }
 
-        guard let mosaicRect = pixelAlignedMosaicRect(for: rect, scale: scale, imageSize: CGSize(width: image.width, height: image.height)) else {
+        let imageSize = image.map { CGSize(width: CGFloat($0.width), height: CGFloat($0.height)) }
+            ?? CGSize(width: bounds.width * scale, height: bounds.height * scale)
+        guard let mosaicRect = pixelAlignedMosaicRect(for: rect, scale: scale, imageSize: imageSize) else {
             return
         }
 
-        let sourceRect = mosaicRect.source
         let destinationRect = mosaicRect.destination
-        guard let crop = image.cropping(to: sourceRect) else {
-            context.setFillColor(NSColor.systemGray.withAlphaComponent(0.55).cgColor)
-            context.fill(destinationRect)
-            return
-        }
+        drawBlackWhiteMosaic(in: destinationRect, blockSize: blockSize, context: context)
+    }
 
-        let blockSize = max(6, min(22, destinationRect.width / 8, destinationRect.height / 8, scale * 10))
-        let tinyWidth = max(1, Int((destinationRect.width * scale / blockSize).rounded()))
-        let tinyHeight = max(1, Int((destinationRect.height * scale / blockSize).rounded()))
-        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
-        guard
-            let smallContext = CGContext(
-                data: nil,
-                width: tinyWidth,
-                height: tinyHeight,
-                bitsPerComponent: 8,
-                bytesPerRow: 0,
-                space: colorSpace,
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-            )
-        else {
-            return
-        }
-        smallContext.interpolationQuality = .low
-        smallContext.draw(crop, in: CGRect(x: 0, y: 0, width: tinyWidth, height: tinyHeight))
-        guard let smallImage = smallContext.makeImage() else { return }
+    private func drawBlackWhiteMosaic(in rect: CGRect, blockSize: CGFloat, context: CGContext) {
+        let size = max(3, blockSize)
+        let startColumn = Int(floor(rect.minX / size))
+        let startRow = Int(floor(rect.minY / size))
+        var y = CGFloat(startRow) * size
 
-        let mosaicImage = NSImage(cgImage: smallImage, size: destinationRect.size)
-        mosaicImage.draw(
-            in: destinationRect,
-            from: .zero,
-            operation: .sourceOver,
-            fraction: 1,
-            respectFlipped: true,
-            hints: [.interpolation: NSImageInterpolation.none]
-        )
+        while y < rect.maxY {
+            var x = CGFloat(startColumn) * size
+            while x < rect.maxX {
+                let column = Int(floor(x / size))
+                let row = Int(floor(y / size))
+                let blockRect = CGRect(x: x, y: y, width: size, height: size).intersection(rect)
+                let isBlack = (column + row).isMultiple(of: 2)
+                context.setFillColor((isBlack ? NSColor.black : NSColor.white).cgColor)
+                context.fill(blockRect)
+                x += size
+            }
+            y += size
+        }
     }
 
     private func pixelAlignedMosaicRect(for rect: CGRect, scale: CGFloat, imageSize: CGSize) -> (source: CGRect, destination: CGRect)? {
