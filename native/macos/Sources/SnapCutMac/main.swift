@@ -7,7 +7,7 @@ import ScreenCaptureKit
 import UniformTypeIdentifiers
 
 private let appName = "SnapCut"
-private let nativeVersion = "0.3.3"
+private let nativeVersion = "0.3.4"
 private let showStatusItemKey = "SnapCutShowStatusItem"
 
 private enum CaptureResult {
@@ -2430,21 +2430,21 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
             return
         }
 
-        let sourceRect = CGRect(
-            x: rect.minX * scale,
-            y: CGFloat(image.height) - rect.maxY * scale,
-            width: rect.width * scale,
-            height: rect.height * scale
-        ).integral
-        guard let crop = image.cropping(to: sourceRect) else {
-            context.setFillColor(NSColor.systemGray.withAlphaComponent(0.55).cgColor)
-            context.fill(rect)
+        guard let mosaicRect = pixelAlignedMosaicRect(for: rect, scale: scale, imageSize: CGSize(width: image.width, height: image.height)) else {
             return
         }
 
-        let blockSize = max(6, min(22, rect.width / 8, rect.height / 8, (exportScale ?? 1) * 10))
-        let tinyWidth = max(1, Int((rect.width * scale / blockSize).rounded()))
-        let tinyHeight = max(1, Int((rect.height * scale / blockSize).rounded()))
+        let sourceRect = mosaicRect.source
+        let destinationRect = mosaicRect.destination
+        guard let crop = image.cropping(to: sourceRect) else {
+            context.setFillColor(NSColor.systemGray.withAlphaComponent(0.55).cgColor)
+            context.fill(destinationRect)
+            return
+        }
+
+        let blockSize = max(6, min(22, destinationRect.width / 8, destinationRect.height / 8, scale * 10))
+        let tinyWidth = max(1, Int((destinationRect.width * scale / blockSize).rounded()))
+        let tinyHeight = max(1, Int((destinationRect.height * scale / blockSize).rounded()))
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
         guard
             let smallContext = CGContext(
@@ -2463,10 +2463,39 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
         smallContext.draw(crop, in: CGRect(x: 0, y: 0, width: tinyWidth, height: tinyHeight))
         guard let smallImage = smallContext.makeImage() else { return }
 
-        context.saveGState()
-        context.interpolationQuality = .none
-        context.draw(smallImage, in: rect)
-        context.restoreGState()
+        let mosaicImage = NSImage(cgImage: smallImage, size: destinationRect.size)
+        mosaicImage.draw(
+            in: destinationRect,
+            from: .zero,
+            operation: .sourceOver,
+            fraction: 1,
+            respectFlipped: true,
+            hints: [.interpolation: NSImageInterpolation.none]
+        )
+    }
+
+    private func pixelAlignedMosaicRect(for rect: CGRect, scale: CGFloat, imageSize: CGSize) -> (source: CGRect, destination: CGRect)? {
+        guard scale > 0, imageSize.width > 0, imageSize.height > 0 else { return nil }
+        let normalized = rect.standardized
+        let minPixelX = max(0, floor(normalized.minX * scale))
+        let maxPixelX = min(imageSize.width, ceil(normalized.maxX * scale))
+        let minPixelYFromTop = max(0, floor(normalized.minY * scale))
+        let maxPixelYFromTop = min(imageSize.height, ceil(normalized.maxY * scale))
+        guard maxPixelX > minPixelX, maxPixelYFromTop > minPixelYFromTop else { return nil }
+
+        let source = CGRect(
+            x: minPixelX,
+            y: imageSize.height - maxPixelYFromTop,
+            width: maxPixelX - minPixelX,
+            height: maxPixelYFromTop - minPixelYFromTop
+        )
+        let destination = CGRect(
+            x: minPixelX / scale,
+            y: minPixelYFromTop / scale,
+            width: (maxPixelX - minPixelX) / scale,
+            height: (maxPixelYFromTop - minPixelYFromTop) / scale
+        )
+        return (source.integral, destination)
     }
 
     private func drawMagnifier(at point: CGPoint) {
