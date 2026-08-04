@@ -7,7 +7,7 @@ import ScreenCaptureKit
 import UniformTypeIdentifiers
 
 private let appName = "SnapCut"
-private let nativeVersion = "0.3.2"
+private let nativeVersion = "0.3.3"
 private let showStatusItemKey = "SnapCutShowStatusItem"
 
 private enum CaptureResult {
@@ -52,7 +52,7 @@ private enum CaptureTool: String, CaseIterable {
         case .ellipse: return "circle"
         case .arrow: return "arrow.up.right"
         case .pen: return "pencil.tip"
-        case .mosaic: return "checkerboard.rectangle"
+        case .mosaic: return "paintbrush.pointed.fill"
         case .text: return "textformat"
         }
     }
@@ -64,7 +64,7 @@ private enum CaptureTool: String, CaseIterable {
         case .ellipse: return "○"
         case .arrow: return "↗"
         case .pen: return "笔"
-        case .mosaic: return "马"
+        case .mosaic: return "码"
         case .text: return "T"
         }
     }
@@ -76,7 +76,7 @@ private enum CaptureTool: String, CaseIterable {
         case .ellipse: return "椭圆"
         case .arrow: return "箭头"
         case .pen: return "画笔"
-        case .mosaic: return "马赛克"
+        case .mosaic: return "马赛克笔"
         case .text: return "文字"
         }
     }
@@ -741,23 +741,51 @@ private final class CapturePanel: NSPanel {
     override var canBecomeMain: Bool { true }
 }
 
-@MainActor
-private func styleFloatingToolbar(_ bar: NSVisualEffectView, cornerRadius: CGFloat = 18) {
-    bar.appearance = NSAppearance(named: .aqua)
-    bar.material = .popover
-    bar.blendingMode = .withinWindow
-    bar.state = .active
-    bar.wantsLayer = true
-    bar.layer?.cornerRadius = cornerRadius
-    bar.layer?.masksToBounds = true
-    bar.layer?.borderWidth = 0.5
-    bar.layer?.borderColor = NSColor.white.withAlphaComponent(0.35).cgColor
+private final class FloatingToolbarView: NSView {
+    private let radius: CGFloat
 
-    let shadow = NSShadow()
-    shadow.shadowColor = NSColor.black.withAlphaComponent(0.22)
-    shadow.shadowOffset = CGSize(width: 0, height: -5)
-    shadow.shadowBlurRadius = 16
-    bar.shadow = shadow
+    init(frame frameRect: NSRect, radius: CGFloat = 14) {
+        self.radius = radius
+        super.init(frame: frameRect)
+        wantsLayer = true
+        appearance = NSAppearance(named: .aqua)
+        updateLayerStyle()
+    }
+
+    required init?(coder: NSCoder) {
+        self.radius = 14
+        super.init(coder: coder)
+        wantsLayer = true
+        appearance = NSAppearance(named: .aqua)
+        updateLayerStyle()
+    }
+
+    override var isFlipped: Bool { true }
+
+    override func layout() {
+        super.layout()
+        updateLayerStyle()
+    }
+
+    private func updateLayerStyle() {
+        guard let layer else { return }
+        layer.cornerRadius = radius
+        layer.cornerCurve = .continuous
+        layer.masksToBounds = false
+        layer.backgroundColor = NSColor(calibratedWhite: 0.90, alpha: 0.92).cgColor
+        layer.borderWidth = 0.5
+        layer.borderColor = NSColor.white.withAlphaComponent(0.55).cgColor
+        layer.shadowColor = NSColor.black.cgColor
+        layer.shadowOpacity = 0.22
+        layer.shadowOffset = CGSize(width: 0, height: -5)
+        layer.shadowRadius = 16
+        layer.shadowPath = CGPath(
+            roundedRect: bounds,
+            cornerWidth: radius,
+            cornerHeight: radius,
+            transform: nil
+        )
+    }
 }
 
 private final class ToolbarIconButton: NSButton {
@@ -920,7 +948,7 @@ private final class RecordingSelectionView: NSView {
     private var interaction: RegionSelectionInteraction = .idle
     private var hoverWindowRect: CGRect?
     private var currentMouse: CGPoint?
-    private var toolbar: NSVisualEffectView?
+    private var toolbar: NSView?
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -1154,8 +1182,7 @@ private final class RecordingSelectionView: NSView {
     private func addToolbar() {
         guard let selection else { return }
         if toolbar == nil {
-            let bar = NSVisualEffectView(frame: CGRect(x: 0, y: 0, width: 150, height: 54))
-            styleFloatingToolbar(bar)
+            let bar = FloatingToolbarView(frame: CGRect(x: 0, y: 0, width: 150, height: 54))
 
             let cancel = makeIconButton(symbolName: "xmark.circle.fill", fallbackTitle: "×", action: #selector(cancelRecording))
             cancel.toolTip = "取消"
@@ -1583,7 +1610,7 @@ private final class AnnotationItem: Equatable {
 
     var bounds: CGRect {
         switch kind {
-        case .rectangle, .ellipse, .mosaic, .text:
+        case .rectangle, .ellipse, .text:
             return rect.standardized
         case .arrow:
             return CGRect(
@@ -1592,7 +1619,7 @@ private final class AnnotationItem: Equatable {
                 width: abs(startPoint.x - endPoint.x),
                 height: abs(startPoint.y - endPoint.y)
             ).insetBy(dx: -max(8, lineWidth), dy: -max(8, lineWidth)).standardized
-        case .pen:
+        case .pen, .mosaic:
             guard let first = points.first else { return .zero }
             var box = CGRect(origin: first, size: .zero)
             for point in points {
@@ -1606,12 +1633,14 @@ private final class AnnotationItem: Equatable {
 
     var isExportable: Bool {
         switch kind {
-        case .rectangle, .ellipse, .mosaic:
+        case .rectangle, .ellipse:
             return rect.standardized.width > 3 && rect.standardized.height > 3
         case .arrow:
             return distance(startPoint, endPoint) > 4
         case .pen:
             return points.count > 1
+        case .mosaic:
+            return !points.isEmpty
         case .text:
             return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .select:
@@ -1679,7 +1708,7 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
     private var interaction: CaptureInteraction = .idle
     private var hoverWindowRect: CGRect?
     private var currentMouse: CGPoint?
-    private var toolbar: NSVisualEffectView?
+    private var toolbar: NSView?
     private var toolButtons: [CaptureTool: NSButton] = [:]
     private var colorButton: ColorSwatchButton?
     private var colorPicker: ColorPickerPopoverView?
@@ -2111,7 +2140,7 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
             item.rect = CGRect(x: point.x, y: point.y, width: 180, height: max(28, item.fontSize + 10))
             startEditingText(item, returnToTool: .text)
             interaction = .idle
-        } else if selectedTool == .pen {
+        } else if selectedTool == .pen || selectedTool == .mosaic {
             interaction = .drawingBrush(item: item)
         } else {
             interaction = .creatingAnnotation(item: item, start: point)
@@ -2122,8 +2151,10 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
 
     private func updateCreatedAnnotation(_ item: AnnotationItem, from start: CGPoint, to point: CGPoint, constrainAspect: Bool, inside limit: CGRect) {
         switch item.kind {
-        case .rectangle, .ellipse, .mosaic:
+        case .rectangle, .ellipse:
             item.rect = annotationRect(from: start, to: point, constrainSquare: constrainAspect, inside: limit)
+        case .mosaic:
+            item.points.append(point)
         case .text:
             item.rect = annotationRect(from: start, to: point, constrainSquare: false, inside: limit)
         case .arrow:
@@ -2297,7 +2328,7 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
         case .pen:
             drawPolyline(item.points, in: context)
         case .mosaic:
-            drawMosaic(item.rect.standardized, in: context, exportScale: exportScale, cropOrigin: cropOrigin)
+            drawMosaicBrush(item, in: context, exportScale: exportScale, cropOrigin: cropOrigin)
         case .text:
             drawText(item, in: context)
         case .select:
@@ -2315,6 +2346,25 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
             context.addLine(to: point)
         }
         context.strokePath()
+    }
+
+    private func clipToBrushPath(points: [CGPoint], lineWidth: CGFloat, in context: CGContext) {
+        let radius = max(3, lineWidth / 2)
+        guard let first = points.first else { return }
+        context.beginPath()
+        if points.count == 1 {
+            context.addEllipse(in: CGRect(x: first.x - radius, y: first.y - radius, width: radius * 2, height: radius * 2))
+            return
+        }
+
+        context.setLineWidth(lineWidth)
+        context.setLineCap(.round)
+        context.setLineJoin(.round)
+        context.move(to: first)
+        for point in points.dropFirst() {
+            context.addLine(to: point)
+        }
+        context.replacePathWithStrokedPath()
     }
 
     private func drawArrow(from start: CGPoint, to end: CGPoint, width: CGFloat, color: NSColor, in context: CGContext) {
@@ -2356,6 +2406,16 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
         ]
         let textRect = item.rect.standardized.insetBy(dx: 2, dy: 1)
         NSString(string: item.text).draw(with: textRect, options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attributes)
+    }
+
+    private func drawMosaicBrush(_ item: AnnotationItem, in context: CGContext, exportScale: CGFloat?, cropOrigin: CGPoint) {
+        let brushBounds = item.bounds.standardized.intersection(bounds)
+        guard !brushBounds.isNull, brushBounds.width > 1, brushBounds.height > 1 else { return }
+        context.saveGState()
+        clipToBrushPath(points: item.points, lineWidth: item.lineWidth, in: context)
+        context.clip()
+        drawMosaic(brushBounds, in: context, exportScale: exportScale, cropOrigin: cropOrigin)
+        context.restoreGState()
     }
 
     private func drawMosaic(_ rect: CGRect, in context: CGContext, exportScale: CGFloat?, cropOrigin: CGPoint) {
@@ -2464,8 +2524,7 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     private func buildToolbar() {
-        let bar = NSVisualEffectView(frame: CGRect(x: 0, y: 0, width: 648, height: 54))
-        styleFloatingToolbar(bar)
+        let bar = FloatingToolbarView(frame: CGRect(x: 0, y: 0, width: 648, height: 54))
 
         var x: CGFloat = 9
 
@@ -2812,12 +2871,14 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
 
     private func hitTest(_ item: AnnotationItem, at point: CGPoint) -> Bool {
         switch item.kind {
-        case .rectangle, .ellipse, .mosaic, .text:
+        case .rectangle, .ellipse, .text:
             return item.rect.standardized.insetBy(dx: -8, dy: -8).contains(point)
         case .arrow:
             return distanceFromPoint(point, toSegmentStart: item.startPoint, end: item.endPoint) <= max(8, item.lineWidth + 5)
-        case .pen:
-            guard item.points.count > 1 else { return false }
+        case .pen, .mosaic:
+            guard item.points.count > 1 else {
+                return item.points.first.map { distance($0, point) <= max(8, item.lineWidth + 5) } ?? false
+            }
             for index in 1..<item.points.count {
                 if distanceFromPoint(point, toSegmentStart: item.points[index - 1], end: item.points[index]) <= max(8, item.lineWidth + 5) {
                     return true
@@ -2945,7 +3006,7 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
     private func resizeAnnotation(_ item: AnnotationItem, handle: ResizeHandle, original: AnnotationGeometry, to point: CGPoint, inside selection: CGRect?, constrainAspect: Bool) {
         let oldBounds = annotationBounds(for: original, kind: item.kind, lineWidth: item.lineWidth)
         let lockedRatio: CGFloat?
-        if constrainAspect, [.rectangle, .ellipse, .mosaic].contains(item.kind) {
+        if constrainAspect, [.rectangle, .ellipse].contains(item.kind) {
             lockedRatio = max(0.1, oldBounds.standardized.width / max(1, oldBounds.standardized.height))
         } else {
             lockedRatio = nil
@@ -2963,12 +3024,12 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
         }
 
         switch item.kind {
-        case .rectangle, .ellipse, .mosaic, .text:
+        case .rectangle, .ellipse, .text:
             item.rect = newBounds
         case .arrow:
             item.startPoint = transform(original.startPoint)
             item.endPoint = transform(original.endPoint)
-        case .pen:
+        case .pen, .mosaic:
             item.points = original.points.map(transform)
         case .select:
             break
@@ -2977,7 +3038,7 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
 
     private func annotationBounds(for geometry: AnnotationGeometry, kind: CaptureTool, lineWidth: CGFloat) -> CGRect {
         switch kind {
-        case .rectangle, .ellipse, .mosaic, .text:
+        case .rectangle, .ellipse, .text:
             return geometry.rect.standardized
         case .arrow:
             return CGRect(
@@ -2986,7 +3047,7 @@ private final class CaptureView: NSView, NSTextFieldDelegate {
                 width: abs(geometry.startPoint.x - geometry.endPoint.x),
                 height: abs(geometry.startPoint.y - geometry.endPoint.y)
             ).insetBy(dx: -max(8, lineWidth), dy: -max(8, lineWidth)).standardized
-        case .pen:
+        case .pen, .mosaic:
             guard let first = geometry.points.first else { return .zero }
             var box = CGRect(origin: first, size: .zero)
             for point in geometry.points {
